@@ -1,0 +1,40 @@
+name: lumet_backend
+
+services:
+  lumet_backend:
+    container_name: lumet_backend_container
+    image: lumet_backend_image
+    build: .
+    command: sh -c "python manage.py migrate && python manage.py runserver 0.0.0.0:8000"
+    volumes:
+      - .:/app
+    ports:
+      - "8000:8000"
+    depends_on:
+      - lumet_postgres
+    restart: unless-stopped
+    environment:
+      - DEBUG=1
+      - SECRET_KEY=changeme
+      - DB_NAME=lumet_db
+      - DB_USER=lumet_user
+      - DB_PASSWORD=lumet_pass
+      - DB_HOST=lumet_postgres
+      - DB_PORT=5432
+
+  lumet_postgres:
+    container_name: lumet_postgres_container
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: lumet_db
+      POSTGRES_USER: lumet_user
+      POSTGRES_PASSWORD: lumet_pass
+    volumes:
+      - lumet_postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    restart: unless-stopped
+
+volumes:
+  lumet_postgres_data:
+    name: lumet_postgres_data_volume
