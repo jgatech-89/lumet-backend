@@ -1,40 +1,58 @@
-name: lumet_backend
+name: lumet
 
 services:
-  lumet_backend:
-    container_name: lumet_backend_container
-    image: lumet_backend_image
-    build: .
-    command: sh -c "python manage.py migrate && python manage.py runserver 0.0.0.0:8000"
-    volumes:
-      - .:/app
-    ports:
-      - "8000:8000"
-    depends_on:
-      - lumet_postgres
-    restart: unless-stopped
-    environment:
-      - DEBUG=1
-      - SECRET_KEY=changeme
-      - DB_NAME=lumet_db
-      - DB_USER=lumet_user
-      - DB_PASSWORD=lumet_pass
-      - DB_HOST=lumet_postgres
-      - DB_PORT=5432
-
   lumet_postgres:
-    container_name: lumet_postgres_container
     image: postgres:15-alpine
+    container_name: lumet_postgres_container
     environment:
       POSTGRES_DB: lumet_db
       POSTGRES_USER: lumet_user
       POSTGRES_PASSWORD: lumet_pass
     volumes:
       - lumet_postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  lumet_backend:
+    build:
+      context: .
+    image: lumet_backend_image
+    container_name: lumet_backend_container
+    command: >
+      sh -c "python manage.py migrate &&
+             python manage.py runserver 0.0.0.0:8000"
+    volumes:
+      - .:/app
     ports:
-      - "5433:5432"
+      - "8000:8000"
+    environment:
+      DB_HOST: lumet_postgres
+      DB_NAME: lumet_db
+      DB_USER: lumet_user
+      DB_PASSWORD: lumet_pass
+      DB_PORT: "5432"
+    depends_on:
+      - lumet_postgres
+    restart: unless-stopped
+
+  lumet_frontend:
+    build:
+      context: ../lumet-frontend
+    image: lumet_frontend_image
+    container_name: lumet_frontend_container
+    command: ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"]
+    volumes:
+      - ../lumet-frontend:/app
+      - lumet_frontend_node_modules:/app/node_modules
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_URL: http://lumet_backend:8000/api
+    depends_on:
+      - lumet_backend
     restart: unless-stopped
 
 volumes:
   lumet_postgres_data:
     name: lumet_postgres_data_volume
+  lumet_frontend_node_modules:
+    name: lumet_frontend_node_modules_volume
