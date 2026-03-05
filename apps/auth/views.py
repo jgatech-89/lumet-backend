@@ -9,8 +9,9 @@ from . import services
 from .schema.auth_schema import login_schema, me_schema, refresh_schema, resend_code_schema, verify_code_schema
 from .serializers import LoginSerializer, ResendCodeSerializer, VerificarCodigoSerializer
 
-MSG_CODE_SENT = 'Si las credenciales son correctas, recibirás un código en tu correo.'
+MSG_CODE_SENT = 'Se ha enviado un código de verificación a tu correo.'
 MSG_CODE_RESENT = 'Si el correo está registrado, recibirás un nuevo código.'
+MSG_INVALID_CREDENTIALS = 'Correo o contraseña incorrectos.'
 
 
 @login_schema
@@ -24,8 +25,12 @@ class LoginView(APIView):
         correo = ser.validated_data['correo'].strip().lower()
         password = ser.validated_data['password']
         user = services.validate_credentials(correo, password)
-        if user:
-            services.create_and_send_code(user)
+        if not user:
+            return Response(
+                {'detail': MSG_INVALID_CREDENTIALS},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+        services.create_and_send_code(user)
         return Response({'mensaje': MSG_CODE_SENT}, status=status.HTTP_200_OK)
 
 
