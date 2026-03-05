@@ -30,7 +30,9 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt',
     'rest_framework_simplejwt.token_blacklist',
     'corsheaders',
-    'apps.core',
+    'drf_spectacular',
+    'apps.persona',
+    'apps.auth',
 ]
 
 MIDDLEWARE = [
@@ -91,6 +93,8 @@ USE_TZ = True
 STATIC_URL = 'static/'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
+AUTH_USER_MODEL = 'persona.Persona'
+
 # REST Framework
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
@@ -99,6 +103,18 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',
     ],
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+    'DEFAULT_PAGINATION_CLASS': 'config.pagination.StandardPagination',
+    'PAGE_SIZE': 20,
+}
+
+SPECTACULAR_SETTINGS = {
+    'TITLE': 'Lumet API',
+    'DESCRIPTION': 'API REST de Lumet. Autenticación por correo + código y JWT.',
+    'VERSION': '1.0.0',
+    'SERVE_INCLUDE_SCHEMA': False,
+    'COMPONENT_SPLIT_REQUEST': True,
+    'SCHEMA_PATH_PREFIX': r'/api/docs',
 }
 
 # Simple JWT
@@ -118,3 +134,21 @@ CORS_ALLOWED_ORIGINS = [] if DEBUG else [
     'http://localhost:3000',
     'http://127.0.0.1:3000',
 ]
+
+# Login con código por correo
+LOGIN_CODE_TIMEOUT = 600  # segundos (10 min)
+
+# Email (dev: consola; prod: configurar SMTP en .env)
+EMAIL_BACKEND = os.getenv(
+    'EMAIL_BACKEND',
+    'django.core.mail.backends.console.EmailBackend',
+)
+DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'noreply@lumet.local')
+
+# Cache para códigos de login (memoria en dev; en prod puede ser Redis)
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+        'OPTIONS': {'MAX_ENTRIES': 1000},
+    }
+}
