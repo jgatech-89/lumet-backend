@@ -24,6 +24,21 @@ docker compose build
 docker compose up
 ```
 
+### Si el backend falla con `ModuleNotFoundError: No module named 'drf_spectacular'`
+
+El código usa dependencias que deben estar en `requirements.txt`. Si la imagen del backend se construyó con una versión antigua (por ejemplo antes de añadir `drf-spectacular`), hay que **reconstruir la imagen sin caché**:
+
+```bash
+docker compose build --no-cache lumet_backend
+docker compose up
+```
+
+Asegúrate de tener la última versión del repo (rama `auth` o `master` actualizada) para que `requirements.txt` incluya todas las dependencias.
+
+### Si el backend falla con `InconsistentMigrationHistory` (admin/persona)
+
+Si ves algo como *"Migration admin.0001_initial is applied before its dependency persona.0001_initial"*, la base de datos tiene un historial de migraciones que no coincide con el código actual (por ejemplo, de antes de tener la app `persona`). **Solución:** hacer un reset de la base de datos (ver sección **Reset de base de datos** más abajo).
+
 ## URLs disponibles
 
 | Recurso | URL |
