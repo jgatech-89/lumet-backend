@@ -48,6 +48,7 @@ services:
       - "5173:5173"
     environment:
       VITE_API_URL: http://lumet_backend:8000/api
+      CHOKIDAR_USEPOLLING: "true"
     depends_on:
       - lumet_backend
     restart: unless-stopped
