@@ -33,6 +33,7 @@ INSTALLED_APPS = [
     'drf_spectacular',
     'apps.persona',
     'apps.auth',
+    'apps.empresa',
 ]
 
 MIDDLEWARE = [
