@@ -11,9 +11,13 @@ class EmpresaViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        return Empresa.objects.select_related(
+        qs = Empresa.objects.filter(estado='1').select_related(
             'usuario_registra', 'usuario_edita', 'usuario_elimina'
-        ).all()
+        )
+        estado = self.request.query_params.get('estado')
+        if estado in ('1', '0'):
+            qs = qs.filter(estado_empresa=estado)
+        return qs.order_by('nombre')
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)

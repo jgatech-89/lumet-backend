@@ -23,6 +23,9 @@ def _nombre_persona(persona):
 
 
 class EmpresaSerializer(serializers.ModelSerializer):
+    # Estado mostrado: Activa/Inactiva según estado_empresa (como Vendedor)
+    estado = serializers.SerializerMethodField()
+
     # Campos descriptivos (texto): nombre completo o username como fallback
     usuario_registra_nombre = serializers.SerializerMethodField()
     usuario_edita_nombre = serializers.SerializerMethodField()
@@ -45,6 +48,7 @@ class EmpresaSerializer(serializers.ModelSerializer):
             'id',
             'nombre',
             'estado',
+            'estado_empresa',
             'usuario_registra_id',
             'usuario_registra_nombre',
             'usuario_edita_id',
@@ -64,6 +68,10 @@ class EmpresaSerializer(serializers.ModelSerializer):
             'fecha_elimina',
         ]
 
+    def get_estado(self, obj):
+        """Devuelve Activa/Inactiva según estado_empresa (como Vendedor)."""
+        return 'Activa' if obj.estado_empresa == '1' else 'Inactiva'
+
     def get_usuario_registra_nombre(self, obj):
         return _nombre_persona(obj.usuario_registra)
 
@@ -74,8 +82,8 @@ class EmpresaSerializer(serializers.ModelSerializer):
         return _nombre_persona(obj.usuario_elimina)
 
     def validate_nombre(self, value):
-        """Evita duplicados sin importar mayúsculas/minúsculas"""
-        queryset = Empresa.objects.filter(nombre__iexact=value)
+        """Evita duplicados solo entre empresas no eliminadas (estado=1)."""
+        queryset = Empresa.objects.filter(nombre__iexact=value, estado='1')
         if self.instance:
             queryset = queryset.exclude(pk=self.instance.pk)
         if queryset.exists():
