@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Persona
+from .models import Persona, Vendedor
 
 
 class PersonaSerializer(serializers.ModelSerializer):
@@ -28,9 +28,13 @@ class PersonaSerializer(serializers.ModelSerializer):
             'is_active',
             'date_joined',
             'created_at',
+            'created_by',
             'updated_at',
+            'updated_by',
+            'deleted_at',
+            'deleted_by',
         ]
-        read_only_fields = ['nombre_completo', 'date_joined', 'created_at', 'updated_at']
+        read_only_fields = ['nombre_completo', 'date_joined', 'created_at', 'created_by', 'updated_at', 'updated_by', 'deleted_at', 'deleted_by']
         extra_kwargs = {'password': {'write_only': True}}
 
     def create(self, validated_data):
@@ -49,3 +53,60 @@ class PersonaSerializer(serializers.ModelSerializer):
             instance.set_password(password)
         instance.save()
         return instance
+
+
+class VendedorListSerializer(serializers.ModelSerializer):
+    estado = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Vendedor
+        fields = ['id', 'nombre_completo', 'tipo_identificacion', 'numero_identificacion', 'estado', 'estado_vendedor']
+
+    def get_estado(self, obj):
+        return 'Activo' if obj.estado_vendedor == '1' else 'Inactivo'
+
+
+class VendedorSerializer(serializers.ModelSerializer):
+
+    class Meta:
+        model = Vendedor
+        fields = [
+            'id',
+            'nombre_completo',
+            'tipo_identificacion',
+            'numero_identificacion',
+            'estado',
+            'estado_vendedor',
+            'created_at',
+            'created_by',
+            'updated_at',
+            'updated_by',
+            'deleted_at',
+            'deleted_by',
+        ]
+        read_only_fields = [
+            'created_at', 'created_by',
+            'updated_at', 'updated_by',
+            'deleted_at', 'deleted_by',
+        ]
+        validators = []
+
+    def validate(self, attrs):
+        tipo = attrs.get('tipo_identificacion')
+        numero = attrs.get('numero_identificacion')
+        if self.instance:
+            tipo = tipo if tipo is not None else self.instance.tipo_identificacion
+            numero = numero if numero is not None else self.instance.numero_identificacion
+        if tipo is not None and numero is not None:
+            qs = Vendedor.objects.filter(
+                deleted_at__isnull=True,
+                tipo_identificacion=tipo,
+                numero_identificacion=numero,
+            )
+            if self.instance:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                raise serializers.ValidationError(
+                    {'numero_identificacion': 'Ya existe un vendedor activo con este tipo y número de identificación.'}
+                )
+        return attrs
