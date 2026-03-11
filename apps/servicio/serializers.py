@@ -20,8 +20,9 @@ def _nombre_persona(persona):
 
 
 class ServicioSerializer(serializers.ModelSerializer):
+    empresa_nombre = serializers.SerializerMethodField()
     empresa_id = serializers.PrimaryKeyRelatedField(
-        queryset=Empresa.objects.all(),
+        queryset=Empresa.objects.filter(estado='1'),
         source='empresa',
     )
     usuario_registra_nombre = serializers.SerializerMethodField()
@@ -46,6 +47,7 @@ class ServicioSerializer(serializers.ModelSerializer):
             'estado',
             'estado_servicio',
             'empresa_id',
+            'empresa_nombre',
             'usuario_registra_id',
             'usuario_registra_nombre',
             'usuario_edita_id',
@@ -64,6 +66,9 @@ class ServicioSerializer(serializers.ModelSerializer):
             'fecha_edita',
             'fecha_elimina',
         ]
+
+    def get_empresa_nombre(self, obj):
+        return obj.empresa.nombre if obj.empresa else None
 
     def get_usuario_registra_nombre(self, obj):
         return _nombre_persona(obj.usuario_registra)

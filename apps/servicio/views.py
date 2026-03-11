@@ -12,12 +12,16 @@ class ServicioViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        return Servicio.objects.select_related(
+        qs = Servicio.objects.filter(estado='1').select_related(
             'empresa',
             'usuario_registra',
             'usuario_edita',
             'usuario_elimina',
-        ).all()
+        )
+        estado = self.request.query_params.get('estado')
+        if estado in ('1', '0'):
+            qs = qs.filter(estado_servicio=estado)
+        return qs.order_by('nombre')
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)

@@ -12,6 +12,7 @@ urlpatterns = [
     path('auth/', include('apps.auth.urls')),
     path('api/', include('apps.persona.urls')),
     path('api/', include('apps.empresa.urls')),
+    path('api/', include('apps.servicio.urls')),
     # Documentación OpenAPI (drf-spectacular)
     path('api/docs/schema/', SpectacularAPIView.as_view(), name='schema'),
     path('api/docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
