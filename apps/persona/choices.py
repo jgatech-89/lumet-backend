@@ -5,7 +5,7 @@ TIPO_IDENTIFICACION = [
     ('CE', 'Cédula de extranjería'),
     ('NIT', 'NIT'),
     ('PAS', 'Pasaporte'),
-    ('TI', 'Tarjeta de identidad'),
+    ('PPT', 'Permiso provisional de trabajo'),
     ('OTRO', 'Otro'),
 ]
 
@@ -17,6 +17,12 @@ PERFIL = [
 ]
 
 ESTADO = [
+    ('1', 'Activo'),
+    ('0', 'Inactivo'),
+]
+
+# Estado del vendedor: activo/inactivo (desactivar sin eliminar)
+ESTADO_VENDEDOR = [
     ('1', 'Activo'),
     ('0', 'Inactivo'),
 ]
