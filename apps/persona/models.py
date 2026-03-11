@@ -1,7 +1,7 @@
 from django.db import models
 from django.utils import timezone
 from django.contrib.auth.models import AbstractUser
-from .choices import ESTADO, ESTADO_VENDEDOR, PERFIL, TIPO_IDENTIFICACION
+from apps.core.choices import ESTADO, ESTADO_VENDEDOR, PERFIL, TIPO_IDENTIFICACION
 
 
 class Persona(AbstractUser):
