@@ -1,14 +1,34 @@
 from rest_framework import viewsets, status
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.filters import SearchFilter
 from django.utils import timezone
+from drf_spectacular.utils import extend_schema_view, extend_schema, OpenApiParameter
 
 from .models import Empresa
 from .serializers import EmpresaSerializer
 
+
+@extend_schema_view(
+    list=extend_schema(
+        tags=['Empresas'],
+        summary='Listar empresas',
+        parameters=[
+            OpenApiParameter(name='search', description='Buscar por nombre', required=False, type=str),
+            OpenApiParameter(name='estado', description='Filtrar por estado: 1=Activa, 0=Inactiva. Omitir = todos', required=False, type=str, enum=['1', '0']),
+        ],
+    ),
+    create=extend_schema(tags=['Empresas'], summary='Crear empresa'),
+    retrieve=extend_schema(tags=['Empresas'], summary='Obtener empresa'),
+    update=extend_schema(tags=['Empresas'], summary='Actualizar empresa (PUT)'),
+    partial_update=extend_schema(tags=['Empresas'], summary='Actualizar empresa (PATCH)'),
+    destroy=extend_schema(tags=['Empresas'], summary='Eliminar empresa (borrado lógico)'),
+)
 class EmpresaViewSet(viewsets.ModelViewSet):
     serializer_class = EmpresaSerializer
     permission_classes = [IsAuthenticated]
+    filter_backends = [SearchFilter]
+    search_fields = ['nombre']
 
     def get_queryset(self):
         qs = Empresa.objects.filter(estado='1').select_related(
