@@ -1,12 +1,13 @@
 from rest_framework import viewsets, status
 from rest_framework.response import Response
+from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.filters import SearchFilter
 from django.utils import timezone
 from drf_spectacular.utils import extend_schema_view, extend_schema, OpenApiParameter
 
 from .models import Empresa
-from .serializers import EmpresaSerializer
+from .serializers import EmpresaSerializer, EmpresaMinimalSerializer
 
 
 @extend_schema_view(
@@ -74,12 +75,24 @@ class EmpresaViewSet(viewsets.ModelViewSet):
     def destroy(self, request, *args, **kwargs):
         """Borrado lógico con mensaje personalizado"""
         instance = self.get_object()
-        instance.estado = '0' 
+        instance.estado = '0'
         instance.usuario_elimina = request.user
         instance.fecha_elimina = timezone.now()
         instance.save()
-        
+
         return Response(
             {'mensaje': 'Empresa eliminada correctamente.'},
             status=status.HTTP_200_OK
         )
+
+    @extend_schema(
+        tags=['Empresas'],
+        summary='Listado de empresas activas para selectores',
+        description='Devuelve solo id y nombre de empresas activas (estado_empresa=1). Uso: dropdowns en formularios.',
+    )
+    @action(detail=False, url_path='activas', methods=['get'])
+    def activas(self, request):
+        """Listado mínimo (id, nombre) de empresas activas para uso en selectores."""
+        qs = Empresa.objects.filter(estado='1', estado_empresa='1').order_by('nombre')
+        serializer = EmpresaMinimalSerializer(qs, many=True)
+        return Response(serializer.data)

@@ -2,6 +2,13 @@ from rest_framework import serializers
 from .models import Empresa
 
 
+class EmpresaMinimalSerializer(serializers.ModelSerializer):
+    """Solo id y nombre, para selectores (ej. modal añadir campo)."""
+    class Meta:
+        model = Empresa
+        fields = ['id', 'nombre']
+
+
 def _nombre_persona(persona):
     """
     Construye el nombre completo de la Persona concatenando:

@@ -2,11 +2,13 @@ from rest_framework import viewsets, status
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.filters import SearchFilter
+from django_filters.rest_framework import DjangoFilterBackend
 from django.utils import timezone
 from drf_spectacular.utils import extend_schema_view, extend_schema, OpenApiParameter
 
 from .models import Servicio
 from .serializers import ServicioSerializer
+from .filters import ServicioFilter
 
 
 @extend_schema_view(
@@ -14,6 +16,7 @@ from .serializers import ServicioSerializer
         tags=['Servicios'],
         summary='Listar servicios',
         parameters=[
+            OpenApiParameter(name='empresa', description='Filtrar por ID de empresa', required=False, type=int),
             OpenApiParameter(name='search', description='Buscar por nombre de servicio o empresa', required=False, type=str),
             OpenApiParameter(name='estado', description='Filtrar por estado: 1=Activa, 0=Inactiva. Omitir = todos', required=False, type=str, enum=['1', '0']),
         ],
@@ -27,7 +30,8 @@ from .serializers import ServicioSerializer
 class ServicioViewSet(viewsets.ModelViewSet):
     serializer_class = ServicioSerializer
     permission_classes = [IsAuthenticated]
-    filter_backends = [SearchFilter]
+    filter_backends = [DjangoFilterBackend, SearchFilter]
+    filterset_class = ServicioFilter
     search_fields = ['nombre', 'empresa__nombre']
 
     def get_queryset(self):

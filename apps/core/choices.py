@@ -38,3 +38,12 @@ ESTADO_SERVICIO = [
     ('1', 'Activo'),
     ('0', 'Inactivo'),
 ]
+
+TIPO_CAMPO = [
+    ('text', 'Texto'),
+    ('number', 'Número'),
+    ('select', 'Select'),
+    ('date', 'Fecha'),
+    ('checkbox', 'Checkbox'),
+    ('textarea', 'Área de texto'),
+]
