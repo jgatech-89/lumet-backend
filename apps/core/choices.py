@@ -49,6 +49,14 @@ TIPO_CAMPO = [
     ('textarea', 'Área de texto'),
 ]
 
+# Secciones fijas del formulario (form builder de campos dinámicos).
+SECCIONES_FORMULARIO = [
+    ('cliente', 'Cliente'),
+    ('datos_base', 'Datos base'),
+    ('campos_formulario', 'Campos del formulario'),
+    ('vendedor', 'Vendedor'),
+]
+
 # Estado de venta: preparado para manejarse por select (configurable).
 ESTADO_VENTA = [
     ('venta_iniciada', 'Venta iniciada'),

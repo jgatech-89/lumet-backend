@@ -4,7 +4,7 @@ from django.utils import timezone
 from apps.empresa.models import Empresa
 from apps.servicio.models import Servicio
 from apps.persona.models import Persona
-from apps.core.choices import ESTADO, TIPO_CAMPO
+from apps.core.choices import ESTADO, TIPO_CAMPO, SECCIONES_FORMULARIO
 
 
 class Campo(models.Model):
@@ -34,6 +34,12 @@ class Campo(models.Model):
         help_text='Valor de la opción del campo Producto al que pertenece este campo (opciones de otro campo).'
     )
     placeholder = models.CharField(max_length=255, blank=True, default='')
+    seccion = models.CharField(
+        max_length=30,
+        choices=SECCIONES_FORMULARIO,
+        default='campos_formulario',
+        help_text='Sección del formulario a la que pertenece el campo.',
+    )
     orden = models.PositiveIntegerField(default=0)
     visible_si = models.CharField(max_length=500, blank=True, default='', help_text='Condición opcional para mostrar el campo según el valor de otro (uso futuro).')
     requerido = models.BooleanField(default=False)
@@ -49,7 +55,7 @@ class Campo(models.Model):
     class Meta:
         verbose_name = 'Campo'
         verbose_name_plural = 'Campos'
-        ordering = ['orden', 'id']
+        ordering = ['seccion', 'orden', 'id']
 
     def delete(self, using=None, keep_parents=False):
         """Eliminación lógica: marca fecha_elimina y estado=0."""

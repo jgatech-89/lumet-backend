@@ -10,7 +10,7 @@ from drf_spectacular.utils import extend_schema_view, extend_schema, OpenApiPara
 from .models import Campo, CampoOpcion
 from .serializers import CampoReadSerializer, CampoWriteSerializer, CampoOpcionSerializer, FormularioCampoSerializer
 from .filters import CampoFilter, CampoOpcionFilter
-from .services import get_campos_formulario
+from .services import get_campos_formulario, reordenar_campos_para_insertar
 from apps.core.choices import ESTADO_VENTA
 
 
@@ -49,7 +49,7 @@ class CampoViewSet(viewsets.ModelViewSet):
             .filter(fecha_elimina__isnull=True)
             .select_related('empresa', 'servicio', 'usuario_registra', 'updated_by', 'usuario_elimina')
             .prefetch_related('opciones')
-            .order_by('orden', 'id')
+            .order_by('seccion', 'orden', 'id')
         )
 
     def create(self, request, *args, **kwargs):
@@ -62,6 +62,15 @@ class CampoViewSet(viewsets.ModelViewSet):
         }, status=status.HTTP_201_CREATED)
 
     def perform_create(self, serializer):
+        data = serializer.validated_data
+        empresa_id = data.get('empresa')
+        empresa_id = empresa_id.pk if hasattr(empresa_id, 'pk') else empresa_id
+        servicio_id = data.get('servicio')
+        servicio_id = servicio_id.pk if hasattr(servicio_id, 'pk') else servicio_id
+        producto = (data.get('producto') or '').strip()
+        seccion = data.get('seccion', 'campos_formulario')
+        orden = data.get('orden', 0)
+        reordenar_campos_para_insertar(empresa_id, servicio_id, producto, seccion, orden, excluir_campo_id=None)
         serializer.save(usuario_registra=self.request.user)
 
     def update(self, request, *args, **kwargs):
@@ -76,6 +85,14 @@ class CampoViewSet(viewsets.ModelViewSet):
         }, status=status.HTTP_200_OK)
 
     def perform_update(self, serializer):
+        instance = serializer.instance
+        data = serializer.validated_data
+        empresa_id = instance.empresa_id
+        servicio_id = instance.servicio_id
+        producto = (instance.producto or '').strip()
+        seccion = data.get('seccion', instance.seccion)
+        orden = data.get('orden', instance.orden)
+        reordenar_campos_para_insertar(empresa_id, servicio_id, producto, seccion, orden, excluir_campo_id=instance.pk)
         serializer.save(updated_by=self.request.user)
 
     def destroy(self, request, *args, **kwargs):
