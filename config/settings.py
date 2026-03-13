@@ -17,7 +17,9 @@ SECRET_KEY = os.getenv('SECRET_KEY', 'changeme-in-production')
 
 DEBUG = os.getenv('DEBUG', '0') == '1'
 
-ALLOWED_HOSTS = ['*']
+# Hosts/dominios permitidos (separados por coma; * = todos en dev)
+_allowed = os.getenv('ALLOWED_HOSTS', '').strip()
+ALLOWED_HOSTS = [h.strip() for h in _allowed.split(',') if h.strip()] if _allowed else ['*']
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -56,7 +58,7 @@ ROOT_URLCONF = 'config.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
+        'DIRS': [BASE_DIR / 'config' / 'templates'],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -101,6 +103,12 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 AUTH_USER_MODEL = 'persona.Persona'
 
 # REST Framework
+def _int_env(name, default):
+    try:
+        return int(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework_simplejwt.authentication.JWTAuthentication',
@@ -110,13 +118,13 @@ REST_FRAMEWORK = {
     ],
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
     'DEFAULT_PAGINATION_CLASS': 'config.pagination.StandardPagination',
-    'PAGE_SIZE': 20,
+    'PAGE_SIZE': _int_env('API_PAGE_SIZE', 20),
 }
 
 SPECTACULAR_SETTINGS = {
-    'TITLE': 'Lumet API',
-    'DESCRIPTION': 'API REST de Lumet. Autenticación por correo + código y JWT.',
-    'VERSION': '1.0.0',
+    'TITLE': os.getenv('API_TITLE', 'Lumet API'),
+    'DESCRIPTION': os.getenv('API_DESCRIPTION', 'API REST de Lumet. Autenticación por correo + código y JWT.'),
+    'VERSION': os.getenv('API_VERSION', '1.0.0'),
     'SERVE_INCLUDE_SCHEMA': False,
     'COMPONENT_SPLIT_REQUEST': True,
     'SCHEMA_PATH_PREFIX': r'/api/docs',
@@ -126,34 +134,42 @@ SPECTACULAR_SETTINGS = {
 from datetime import timedelta
 
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
+    'ACCESS_TOKEN_LIFETIME': timedelta(hours=_int_env('SIMPLE_JWT_ACCESS_TOKEN_HOURS', 10)),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=_int_env('SIMPLE_JWT_REFRESH_TOKEN_DAYS', 7)),
     'ROTATE_REFRESH_TOKENS': True,
     'BLACKLIST_AFTER_ROTATION': True,
     'AUTH_HEADER_TYPES': ('Bearer',),
 }
 
-# CORS
+# CORS (orígenes permitidos cuando DEBUG=False; separados por coma)
 CORS_ALLOW_ALL_ORIGINS = DEBUG
-CORS_ALLOWED_ORIGINS = [] if DEBUG else [
-    'http://localhost:3000',
-    'http://127.0.0.1:3000',
-]
+_cors_origins = os.getenv('CORS_ALLOWED_ORIGINS', 'http://localhost:3000,http://127.0.0.1:3000').strip()
+CORS_ALLOWED_ORIGINS = [o.strip() for o in _cors_origins.split(',') if o.strip()] if _cors_origins else []
 
-# Login con código por correo
-LOGIN_CODE_TIMEOUT = 600  # segundos (10 min)
+# Autenticación: tiempos de expiración (segundos)
+LOGIN_CODE_TIMEOUT = _int_env('LOGIN_CODE_TIMEOUT', 600)  # código OTP login (default 10 min)
+PWD_RESET_TOKEN_TIMEOUT = _int_env('PWD_RESET_TOKEN_TIMEOUT', 300)  # token para cambiar contraseña (default 5 min)
 
-# Email (dev: consola; prod: configurar SMTP en .env)
+# Email (dev: consola; prod: Resend o SMTP en .env)
 EMAIL_BACKEND = os.getenv(
     'EMAIL_BACKEND',
     'django.core.mail.backends.console.EmailBackend',
 )
 DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'noreply@lumet.local')
 
+# Resend (producción): API key desde .env (API_KEY_RESEND). Si está definida, el servicio de correo usará Resend.
+RESEND_API_KEY = os.getenv('API_KEY_RESEND', '').strip() or None
+# Remitente para Resend (debe ser un correo/dominio verificado en Resend)
+RESEND_FROM_EMAIL = os.getenv('RESEND_FROM_EMAIL', DEFAULT_FROM_EMAIL)
+# Remitente de prueba Resend cuando el dominio no está verificado (.local, etc.)
+RESEND_SANDBOX_FROM = os.getenv('RESEND_SANDBOX_FROM', 'Lumet <onboarding@resend.dev>').strip()
+# URL del logo para plantillas de correo (opcional; si no se define, se muestra el texto "Lumet")
+LUMET_LOGO_URL = os.getenv('LUMET_LOGO_URL', '').strip() or None
+
 # Cache para códigos de login (memoria en dev; en prod puede ser Redis)
 CACHES = {
     'default': {
         'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
-        'OPTIONS': {'MAX_ENTRIES': 1000},
+        'OPTIONS': {'MAX_ENTRIES': _int_env('CACHE_MAX_ENTRIES', 1000)},
     }
 }

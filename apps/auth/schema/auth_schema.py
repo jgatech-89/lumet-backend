@@ -4,7 +4,7 @@ Decoradores reutilizables; sin lógica de negocio.
 """
 from drf_spectacular.utils import OpenApiExample, OpenApiResponse, extend_schema
 
-from ..serializers import LoginSerializer, ResendCodeSerializer, VerificarCodigoSerializer
+from ..serializers import LoginSerializer, ResendCodeSerializer, VerificarCodigoSerializer, ForgotPasswordRequestSerializer, ForgotPasswordVerifySerializer, ForgotPasswordSetSerializer
 
 MSG_CODE_SENT = 'Si las credenciales son correctas, recibirás un código en tu correo.'
 MSG_CODE_RESENT = 'Si el correo está registrado, recibirás un nuevo código.'
@@ -18,8 +18,11 @@ login_schema = extend_schema(
     request=LoginSerializer,
     responses={
         200: OpenApiResponse(
-            description='Siempre 200 con mensaje genérico (no revela si el correo existe).',
-            examples=[OpenApiExample('Éxito', value={'mensaje': MSG_CODE_SENT})],
+            description='Credenciales válidas: mensaje y correo_auth (destinatario real del OTP).',
+            examples=[OpenApiExample(
+                'Éxito',
+                value={'mensaje': MSG_CODE_SENT, 'correo_auth': 'admin@empresa.com'},
+            )],
         ),
         400: OpenApiResponse(description='Datos inválidos (formato correo/password).'),
     },
@@ -86,14 +89,68 @@ me_schema = extend_schema(
 resend_code_schema = extend_schema(
     tags=['Autenticación'],
     summary='Reenviar código',
-    description='Solicita un nuevo código de verificación para el correo. '
-                'Siempre responde con el mismo mensaje (no revela si el correo existe).',
+    description='Solicita un nuevo código de verificación. Si el usuario existe, puede incluir correo_auth (destinatario del OTP).',
     request=ResendCodeSerializer,
     responses={
         200: OpenApiResponse(
-            description='Mensaje genérico.',
-            examples=[OpenApiExample('Éxito', value={'mensaje': MSG_CODE_RESENT})],
+            description='Mensaje y opcionalmente correo_auth.',
+            examples=[OpenApiExample(
+                'Éxito',
+                value={'mensaje': MSG_CODE_RESENT, 'correo_auth': 'admin@empresa.com'},
+            )],
         ),
         400: OpenApiResponse(description='Formato de correo inválido.'),
+    },
+)
+
+
+MSG_PWD_RESET_SENT = 'Si el correo está registrado, recibirás un código para recuperar tu contraseña.'
+MSG_PWD_RESET_DONE = 'Contraseña actualizada. Ya puedes iniciar sesión con tu nueva contraseña.'
+
+forgot_password_request_schema = extend_schema(
+    tags=['Autenticación'],
+    summary='Solicitar recuperación de contraseña',
+    description='Envía el correo. Si está registrado y activo, se genera un código y se envía al correo auth; '
+                'puede incluir correo_auth en la respuesta.',
+    request=ForgotPasswordRequestSerializer,
+    responses={
+        200: OpenApiResponse(
+            description='Mensaje y opcionalmente correo_auth (destinatario del código).',
+            examples=[OpenApiExample(
+                'Éxito',
+                value={'mensaje': MSG_PWD_RESET_SENT, 'correo_auth': 'admin@empresa.com'},
+            )],
+        ),
+        400: OpenApiResponse(description='Formato de correo inválido.'),
+    },
+)
+
+forgot_password_verify_schema = extend_schema(
+    tags=['Autenticación'],
+    summary='Verificar código de recuperación',
+    description='Envía correo y código recibido. Si son correctos, se devuelve un token de un solo uso '
+                'para el endpoint de cambiar contraseña (forgot-password/set).',
+    request=ForgotPasswordVerifySerializer,
+    responses={
+        200: OpenApiResponse(
+            description='Token para cambiar contraseña.',
+            examples=[OpenApiExample('Éxito', value={'token': 'uuid-del-token'})],
+        ),
+        400: OpenApiResponse(description='Código inválido o expirado.'),
+    },
+)
+
+forgot_password_set_schema = extend_schema(
+    tags=['Autenticación'],
+    summary='Establecer nueva contraseña',
+    description='Envía el token recibido tras verificar el código, la nueva contraseña y su confirmación. '
+                'Si el token es válido, se actualiza la contraseña y el token se invalida.',
+    request=ForgotPasswordSetSerializer,
+    responses={
+        200: OpenApiResponse(
+            description='Contraseña actualizada.',
+            examples=[OpenApiExample('Éxito', value={'mensaje': MSG_PWD_RESET_DONE})],
+        ),
+        400: OpenApiResponse(description='Token expirado/inválido o contraseñas no coinciden.'),
     },
 )
