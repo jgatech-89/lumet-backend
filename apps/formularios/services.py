@@ -23,7 +23,7 @@ def reordenar_campos_para_insertar(empresa_id, servicio_id, producto, seccion, o
     qs.update(orden=F('orden') + 1)
 
 
-def get_campos_formulario(empresa_id: int = None, servicio_id: int = None, producto: str = None):
+def get_campos_formulario(empresa_id: int = None, servicio_id: int = None, producto: str = None, solo_sin_producto: bool = False):
     """
     Devuelve los campos configurados para un formulario.
     - Si empresa_id y servicio_id son None: devuelve campos globales (empresa=null, servicio=null).
@@ -31,7 +31,8 @@ def get_campos_formulario(empresa_id: int = None, servicio_id: int = None, produ
       - Campos con empresa_id=null y servicio_id=null (aplican a todos).
       - Campos con empresa_id=X y servicio_id=null (aplican a todos los servicios de esa empresa).
       - Campos con empresa_id=X y servicio_id=Y (aplican a ese servicio).
-    - Si producto se proporciona: filtra para mostrar solo campos que aplican a ese producto:
+    - Si solo_sin_producto=True: solo campos con producto vacío (no tienen restricción por producto).
+    - Si producto se proporciona (y no solo_sin_producto): filtra campos que aplican a ese producto:
       - Campos con producto vacío (aplican a todos los productos).
       - Campos cuyo producto coincide con el valor seleccionado.
     Solo activos, ordenados por `orden`, con opciones para tipo select.
@@ -51,7 +52,9 @@ def get_campos_formulario(empresa_id: int = None, servicio_id: int = None, produ
             | (Q(empresa_id=empresa_id) & (Q(servicio_id=servicio_id) | Q(servicio_id__isnull=True)))
         )
 
-    if producto and str(producto).strip():
+    if solo_sin_producto:
+        qs = qs.filter(producto='')
+    elif producto and str(producto).strip():
         producto_val = str(producto).strip()
         qs = qs.filter(Q(producto='') | Q(producto__iexact=producto_val))
 

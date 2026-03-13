@@ -17,6 +17,7 @@ class Cliente(models.Model):
     numero_identificacion = models.CharField(max_length=50, db_index=True, blank=True)
     telefono = models.CharField(max_length=20, blank=True)
     correo = models.EmailField(max_length=254, blank=True)
+    direccion = models.CharField(max_length=500, blank=True, default='')
     estado = models.CharField(max_length=20, choices=ESTADO, default='1')
     servicio_id = models.PositiveIntegerField(null=True, blank=True, help_text='ID del servicio seleccionado al crear el cliente')
     producto = models.CharField(max_length=255, blank=True, default='', help_text='Producto seleccionado al completar el cliente')
@@ -129,8 +130,9 @@ class FormularioCliente(models.Model):
 
 class ClienteEmpresa(models.Model):
     """
-    Relación cliente + tipo_cliente + empresa + servicio + producto.
+    Relación cliente + tipo_cliente + empresa + servicio + producto + vendedor.
     Centraliza la relación entre cliente, tipo, empresa, producto/servicio y formulario.
+    El vendedor se asocia al producto vendido (ClienteEmpresa).
     Se crea al registrar un cliente nuevo y al agregar productos a clientes existentes.
     """
     cliente = models.ForeignKey(
@@ -139,6 +141,14 @@ class ClienteEmpresa(models.Model):
         related_name='cliente_empresas',
     )
     tipo_cliente = models.CharField(max_length=255, blank=True, default='')
+    vendedor = models.ForeignKey(
+        'persona.Vendedor',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='cliente_empresas',
+        verbose_name='Vendedor del producto',
+    )
     empresa = models.ForeignKey(
         Empresa,
         on_delete=models.PROTECT,

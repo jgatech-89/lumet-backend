@@ -19,7 +19,7 @@ class HistorialEstadoVentaInline(admin.TabularInline):
 class ClienteEmpresaInline(admin.TabularInline):
     model = ClienteEmpresa
     extra = 0
-    readonly_fields = ['tipo_cliente', 'empresa', 'servicio', 'producto', 'fecha_registra']
+    readonly_fields = ['tipo_cliente', 'vendedor', 'empresa', 'servicio', 'producto', 'fecha_registra']
     can_delete = True
     fk_name = 'cliente'
 
@@ -59,8 +59,8 @@ class HistorialEstadoVentaAdmin(admin.ModelAdmin):
 
 @admin.register(ClienteEmpresa)
 class ClienteEmpresaAdmin(admin.ModelAdmin):
-    list_display = ['cliente', 'tipo_cliente', 'empresa', 'servicio', 'producto', 'estado', 'fecha_registra']
-    list_filter = ['estado', 'empresa', 'servicio']
-    search_fields = ['cliente__nombre', 'tipo_cliente', 'producto']
+    list_display = ['cliente', 'tipo_cliente', 'vendedor', 'empresa', 'servicio', 'producto', 'estado', 'fecha_registra']
+    list_filter = ['estado', 'empresa', 'servicio', 'vendedor']
+    search_fields = ['cliente__nombre', 'tipo_cliente', 'producto', 'vendedor__nombre_completo']
     readonly_fields = ['fecha_registra']
-    autocomplete_fields = ['cliente', 'empresa', 'servicio']
+    autocomplete_fields = ['cliente', 'empresa', 'servicio', 'vendedor']

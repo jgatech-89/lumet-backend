@@ -272,6 +272,16 @@ class ClienteViewSet(viewsets.ModelViewSet):
                 ce.empresa_id = servicio.empresa_id
         if 'producto' in data:
             ce.producto = (data.get('producto') or '').strip()
+
+        for item in data.get('respuestas', []):
+            nombre_campo = (item.get('nombre_campo') or '').strip()
+            if 'vendedor' in norm(nombre_campo):
+                try:
+                    ce.vendedor_id = int(str(item.get('respuesta_campo', '')).strip()) or None
+                except (ValueError, TypeError):
+                    ce.vendedor_id = None
+                break
+
         ce.save()
 
         for item in data.get('respuestas', []):

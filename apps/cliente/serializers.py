@@ -13,11 +13,15 @@ class FormularioClienteSerializer(serializers.ModelSerializer):
 class ClienteEmpresaSerializer(serializers.ModelSerializer):
     empresa_nombre = serializers.CharField(source='empresa.nombre', read_only=True)
     servicio_nombre = serializers.CharField(source='servicio.nombre', read_only=True)
+    vendedor_nombre = serializers.SerializerMethodField()
     estado_venta = serializers.SerializerMethodField()
 
     class Meta:
         model = ClienteEmpresa
-        fields = ['id', 'tipo_cliente', 'empresa', 'empresa_nombre', 'servicio', 'servicio_nombre', 'producto', 'estado_venta', 'fecha_registra']
+        fields = ['id', 'tipo_cliente', 'empresa', 'empresa_nombre', 'servicio', 'servicio_nombre', 'producto', 'vendedor', 'vendedor_nombre', 'estado_venta', 'fecha_registra']
+
+    def get_vendedor_nombre(self, obj):
+        return (obj.vendedor.nombre_completo if obj.vendedor else None) if obj.vendedor_id else None
 
     def get_estado_venta(self, obj):
         h = HistorialEstadoVenta.objects.filter(
@@ -170,6 +174,7 @@ class ClienteCreateSerializer(serializers.Serializer):
     numero_identificacion = serializers.CharField(max_length=50, required=False, allow_blank=True)
     telefono = serializers.CharField(max_length=20, required=False, allow_blank=True)
     correo = serializers.EmailField(required=False, allow_blank=True)
+    direccion = serializers.CharField(max_length=500, required=False, allow_blank=True)
     respuestas = serializers.ListField(
         child=serializers.DictField(child=serializers.CharField()),
         required=False,
@@ -204,6 +209,19 @@ class ClienteCreateSerializer(serializers.Serializer):
         es_campo_producto = lambda n: any(norm(n) == norm(p) for p in NOMBRES_PRODUCTO_CAMPO)
         es_extra_permitido = lambda n: any(norm(n) == norm(p) for p in NOMBRES_EXTRA_PERMITIDOS)
 
+        def get_valor_campo(nombre_requerido):
+            """Obtiene el valor con búsqueda flexible (ej: Vendedor vs vendedor)."""
+            if nombre_requerido in respuestas_por_campo:
+                return respuestas_por_campo[nombre_requerido]
+            for k, v in respuestas_por_campo.items():
+                if norm(k) == norm(nombre_requerido):
+                    return v
+            if 'vendedor' in norm(nombre_requerido):
+                for k, v in respuestas_por_campo.items():
+                    if 'vendedor' in norm(k):
+                        return v
+            return ''
+
         def es_visible_si_cambio_titular(campo):
             vs = (getattr(campo, 'visible_si', None) or '').lower().replace('_', ' ').strip()
             return 'cambio' in vs and 'titular' in vs
@@ -232,7 +250,7 @@ class ClienteCreateSerializer(serializers.Serializer):
                 })
 
         for nombre in campos_requeridos:
-            valor = respuestas_por_campo.get(nombre, '')
+            valor = get_valor_campo(nombre)
             if not valor or not str(valor).strip():
                 raise serializers.ValidationError({
                     'respuestas': f'El campo "{nombre}" es obligatorio.'
@@ -271,16 +289,22 @@ class ClienteCreateSerializer(serializers.Serializer):
         # Crear ClienteEmpresa primero para asociar el estado de venta al producto
         NOMBRES_TIPO_CLIENTE = ['tipo_cliente', 'Tipo de cliente', 'Tipo Cliente', 'tipo cliente']
         tipo_cliente_val = ''
+        vendedor_id_val = None
         for item in respuestas:
             nombre = (item.get('nombre_campo') or '').strip()
             if any(norm(nombre) == norm(n) for n in NOMBRES_TIPO_CLIENTE):
                 tipo_cliente_val = str(item.get('respuesta_campo', '')).strip()
-                break
+            elif 'vendedor' in norm(nombre):
+                try:
+                    vendedor_id_val = int(str(item.get('respuesta_campo', '')).strip())
+                except (ValueError, TypeError):
+                    pass
         servicio = Servicio.objects.filter(id=cliente.servicio_id).first()
         empresa_id = servicio.empresa_id if servicio else None
         ce = ClienteEmpresa.objects.create(
             cliente=cliente,
             tipo_cliente=tipo_cliente_val,
+            vendedor_id=vendedor_id_val,
             empresa_id=empresa_id,
             servicio_id=cliente.servicio_id,
             producto=producto or '',
@@ -357,6 +381,19 @@ class ClienteAgregarProductoSerializer(serializers.Serializer):
                 continue
             campos_requeridos.add(c.nombre)
 
+        def get_valor_campo(nombre_requerido):
+            """Obtiene el valor con búsqueda flexible (ej: Vendedor vs vendedor)."""
+            if nombre_requerido in respuestas_por_campo:
+                return respuestas_por_campo[nombre_requerido]
+            for k, v in respuestas_por_campo.items():
+                if norm(k) == norm(nombre_requerido):
+                    return v
+            if 'vendedor' in norm(nombre_requerido):
+                for k, v in respuestas_por_campo.items():
+                    if 'vendedor' in norm(k):
+                        return v
+            return ''
+
         for nombre_campo in respuestas_por_campo:
             if nombre_campo not in nombres_campos and not es_extra_permitido(nombre_campo):
                 raise serializers.ValidationError({
@@ -364,7 +401,7 @@ class ClienteAgregarProductoSerializer(serializers.Serializer):
                 })
 
         for nombre in campos_requeridos:
-            valor = respuestas_por_campo.get(nombre, '')
+            valor = get_valor_campo(nombre)
             if not valor or not str(valor).strip():
                 raise serializers.ValidationError({
                     'respuestas': f'El campo "{nombre}" es obligatorio.'
@@ -392,15 +429,21 @@ class ClienteAgregarProductoSerializer(serializers.Serializer):
         empresa_id = servicio.empresa_id if servicio else None
         NOMBRES_TIPO_CLIENTE = ['tipo_cliente', 'Tipo de cliente', 'Tipo Cliente', 'tipo cliente']
         tipo_cliente_val = ''
+        vendedor_id_val = None
         for item in respuestas:
             nombre = (item.get('nombre_campo') or '').strip()
             if any(norm(nombre) == norm(n) for n in NOMBRES_TIPO_CLIENTE):
                 tipo_cliente_val = str(item.get('respuesta_campo', '')).strip()
-                break
+            elif 'vendedor' in norm(nombre):
+                try:
+                    vendedor_id_val = int(str(item.get('respuesta_campo', '')).strip())
+                except (ValueError, TypeError):
+                    pass
 
         ce = ClienteEmpresa.objects.create(
             cliente=cliente,
             tipo_cliente=tipo_cliente_val,
+            vendedor_id=vendedor_id_val,
             empresa_id=empresa_id,
             servicio_id=servicio_id,
             producto=producto or '',
