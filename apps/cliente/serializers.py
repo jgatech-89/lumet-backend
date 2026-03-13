@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from apps.servicio.models import Servicio
 from apps.formularios.services import get_campos_formulario
-from .models import Cliente, FormularioCliente, HistorialEstadoVenta
+from .models import Cliente, FormularioCliente, HistorialEstadoVenta, ClienteEmpresa
 
 
 class FormularioClienteSerializer(serializers.ModelSerializer):
@@ -232,6 +232,152 @@ class ClienteCreateSerializer(serializers.Serializer):
             cliente=cliente,
             estado=estado_inicial,
             activo=True,
+            usuario_registra=user,
+        )
+
+        # Guardar en ClienteEmpresa: centraliza relación cliente + tipo_cliente + empresa + producto/servicio
+        NOMBRES_TIPO_CLIENTE = ['tipo_cliente', 'Tipo de cliente', 'Tipo Cliente', 'tipo cliente']
+        tipo_cliente_val = ''
+        for item in respuestas:
+            nombre = (item.get('nombre_campo') or '').strip()
+            if any(norm(nombre) == norm(n) for n in NOMBRES_TIPO_CLIENTE):
+                tipo_cliente_val = str(item.get('respuesta_campo', '')).strip()
+                break
+        servicio = Servicio.objects.filter(id=cliente.servicio_id).first()
+        empresa_id = servicio.empresa_id if servicio else None
+        ClienteEmpresa.objects.create(
+            cliente=cliente,
+            tipo_cliente=tipo_cliente_val,
+            empresa_id=empresa_id,
+            servicio_id=cliente.servicio_id,
+            producto=producto or '',
+            formulario_id=None,
+            usuario_registra=user,
+        )
+        return cliente
+
+
+class ClienteAgregarProductoSerializer(serializers.Serializer):
+    """Serializer para agregar un nuevo producto a un cliente existente (sin duplicar datos del cliente)."""
+    servicio_id = serializers.IntegerField()
+    producto = serializers.CharField(max_length=255, required=False, allow_blank=True)
+    respuestas = serializers.ListField(
+        child=serializers.DictField(child=serializers.CharField()),
+        required=False,
+        default=list
+    )
+
+    def validate(self, attrs):
+        servicio_id = attrs.get('servicio_id')
+        respuestas = attrs.get('respuestas', [])
+        producto = (attrs.get('producto') or '').strip() or None
+
+        if not servicio_id:
+            return attrs
+
+        try:
+            servicio = Servicio.objects.get(id=servicio_id, estado='1')
+        except Servicio.DoesNotExist:
+            raise serializers.ValidationError({'servicio_id': 'Servicio no válido o inactivo.'})
+
+        empresa_id = servicio.empresa_id
+        campos = list(get_campos_formulario(empresa_id, servicio_id, producto))
+        nombres_campos = {c.nombre for c in campos}
+        respuestas_por_campo = {item.get('nombre_campo'): item.get('respuesta_campo', '') for item in respuestas if item.get('nombre_campo')}
+
+        NOMBRES_TIPO_CLIENTE = ['tipo_cliente', 'Tipo de cliente', 'Tipo Cliente', 'tipo cliente']
+        NOMBRES_ESTADO_VENTA = ['estado_venta', 'Estado de venta', 'Estado venta', 'estado venta']
+        NOMBRES_PRODUCTO_CAMPO = ['producto', 'Producto']
+        NOMBRES_CAMBIO_TITULAR = ['cambio de titular', 'Cambio de titular', 'cambio titular', 'Cambio titular']
+        NOMBRES_EXTRA_PERMITIDOS = ['vendedor', 'Vendedor']
+        norm = lambda s: (s or '').lower().replace(' ', '_')
+        es_campo_producto = lambda n: any(norm(n) == norm(p) for p in NOMBRES_PRODUCTO_CAMPO)
+        es_extra_permitido = lambda n: any(norm(n) == norm(p) for p in NOMBRES_EXTRA_PERMITIDOS)
+
+        def es_visible_si_cambio_titular(campo):
+            vs = (getattr(campo, 'visible_si', None) or '').lower().replace('_', ' ').strip()
+            return 'cambio' in vs and 'titular' in vs
+
+        def cambio_titular_marcado():
+            for n in NOMBRES_CAMBIO_TITULAR:
+                for k, v in respuestas_por_campo.items():
+                    if norm(k) == norm(n):
+                        val = str(v or '').lower().strip()
+                        return val in ('1', 'si', 'true', 'yes')
+            return False
+
+        es_campo_estado_venta = lambda n: any(norm(n) == norm(ev) for ev in NOMBRES_ESTADO_VENTA)
+        ct_marcado = cambio_titular_marcado()
+        campos_requeridos = set()
+        for c in campos:
+            if not c.requerido or es_campo_producto(c.nombre) or es_campo_estado_venta(c.nombre):
+                continue
+            if es_visible_si_cambio_titular(c) and not ct_marcado:
+                continue
+            campos_requeridos.add(c.nombre)
+
+        for nombre_campo in respuestas_por_campo:
+            if nombre_campo not in nombres_campos and not es_extra_permitido(nombre_campo):
+                raise serializers.ValidationError({
+                    'respuestas': f'El campo "{nombre_campo}" no está configurado para este servicio.'
+                })
+
+        for nombre in campos_requeridos:
+            valor = respuestas_por_campo.get(nombre, '')
+            if not valor or not str(valor).strip():
+                raise serializers.ValidationError({
+                    'respuestas': f'El campo "{nombre}" es obligatorio.'
+                })
+
+        return attrs
+
+    def create(self, validated_data):
+        cliente = self.context['cliente']
+        respuestas = validated_data.pop('respuestas', [])
+        producto = (validated_data.pop('producto', '') or '').strip()
+        servicio_id = validated_data.get('servicio_id')
+        user = self.context['request'].user
+
+        NOMBRES_ESTADO_VENTA = ['estado_venta', 'Estado de venta', 'Estado venta', 'estado venta']
+        norm = lambda s: (s or '').lower().replace(' ', '_')
+
+        # Al agregar producto nuevo, establecer estado de venta a venta_iniciada
+        _cambiar_estado_venta(cliente, 'venta_iniciada', user)
+
+        for item in respuestas:
+            nombre_campo = item.get('nombre_campo', '')
+            respuesta_campo = str(item.get('respuesta_campo', ''))
+            if not nombre_campo:
+                continue
+            if any(norm(nombre_campo) == norm(n) for n in NOMBRES_ESTADO_VENTA):
+                _cambiar_estado_venta(cliente, (respuesta_campo or '').strip() or 'venta_iniciada', user)
+            else:
+                fc, created = FormularioCliente.objects.get_or_create(
+                    cliente=cliente,
+                    nombre_campo=nombre_campo,
+                    defaults={'respuesta_campo': respuesta_campo, 'usuario_registra': user}
+                )
+                if not created and fc.respuesta_campo != respuesta_campo:
+                    fc.respuesta_campo = respuesta_campo
+                    fc.save()
+
+        servicio = Servicio.objects.filter(id=servicio_id).first()
+        empresa_id = servicio.empresa_id if servicio else None
+        NOMBRES_TIPO_CLIENTE = ['tipo_cliente', 'Tipo de cliente', 'Tipo Cliente', 'tipo cliente']
+        tipo_cliente_val = ''
+        for item in respuestas:
+            nombre = (item.get('nombre_campo') or '').strip()
+            if any(norm(nombre) == norm(n) for n in NOMBRES_TIPO_CLIENTE):
+                tipo_cliente_val = str(item.get('respuesta_campo', '')).strip()
+                break
+
+        ClienteEmpresa.objects.create(
+            cliente=cliente,
+            tipo_cliente=tipo_cliente_val,
+            empresa_id=empresa_id,
+            servicio_id=servicio_id,
+            producto=producto or '',
+            formulario_id=None,
             usuario_registra=user,
         )
         return cliente

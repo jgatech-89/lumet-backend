@@ -19,6 +19,7 @@ from .serializers import (
     ClienteCreateSerializer,
     ClienteDetalleSerializer,
     ClienteUpdateSerializer,
+    ClienteAgregarProductoSerializer,
     _cambiar_estado_venta,
 )
 from .filters import ClienteFilter
@@ -95,6 +96,21 @@ class ClienteViewSet(viewsets.ModelViewSet):
             'mensaje': 'Cliente actualizado correctamente.',
             'data': ClienteDetalleSerializer(instance).data,
         }, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'], url_path='agregar-producto')
+    def agregar_producto(self, request, pk=None):
+        """Agrega un nuevo producto a un cliente existente (sin duplicar datos del cliente)."""
+        cliente = self.get_object()
+        serializer = ClienteAgregarProductoSerializer(
+            data=request.data,
+            context={'request': request, 'cliente': cliente}
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(
+            {'mensaje': 'Producto agregado correctamente.'},
+            status=status.HTTP_201_CREATED,
+        )
 
     @action(detail=True, methods=['post'], url_path='cambiar-estado')
     def cambiar_estado(self, request, pk=None):

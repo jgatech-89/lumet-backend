@@ -1,10 +1,12 @@
 """
-Modelos de la app cliente: Cliente, FormularioCliente (respuestas dinámicas) y HistorialEstadoVenta.
+Modelos de la app cliente: Cliente, FormularioCliente (respuestas dinámicas), HistorialEstadoVenta y ClienteEmpresa.
 """
 from django.db import models
 from django.utils import timezone
 
 from apps.persona.models import Persona
+from apps.empresa.models import Empresa
+from apps.servicio.models import Servicio
 from apps.core.choices import ESTADO, TIPO_IDENTIFICACION
 
 
@@ -115,3 +117,51 @@ class FormularioCliente(models.Model):
 
     def __str__(self):
         return f'{self.cliente} - {self.nombre_campo}'
+
+
+class ClienteEmpresa(models.Model):
+    """
+    Relación cliente + tipo_cliente + empresa + servicio + producto.
+    Centraliza la relación entre cliente, tipo, empresa, producto/servicio y formulario.
+    Se crea al registrar un cliente nuevo y al agregar productos a clientes existentes.
+    """
+    cliente = models.ForeignKey(
+        Cliente,
+        on_delete=models.CASCADE,
+        related_name='cliente_empresas',
+    )
+    tipo_cliente = models.CharField(max_length=255, blank=True, default='')
+    empresa = models.ForeignKey(
+        Empresa,
+        on_delete=models.PROTECT,
+        related_name='cliente_empresas',
+        null=True,
+        blank=True,
+    )
+    servicio = models.ForeignKey(
+        Servicio,
+        on_delete=models.PROTECT,
+        related_name='cliente_empresas',
+        null=True,
+        blank=True,
+    )
+    producto = models.CharField(max_length=255, blank=True, default='')
+    formulario_id = models.PositiveIntegerField(null=True, blank=True, help_text='Referencia a formulario/campo si aplica')
+    estado = models.CharField(max_length=20, choices=ESTADO, default='1')
+    fecha_registra = models.DateTimeField(auto_now_add=True)
+    usuario_registra = models.ForeignKey(
+        Persona,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='cliente_empresas_registrados',
+    )
+
+    class Meta:
+        verbose_name = 'Cliente empresa'
+        verbose_name_plural = 'Cliente empresas'
+        ordering = ['-fecha_registra']
+
+    def __str__(self):
+        emp = self.empresa.nombre if self.empresa_id else '-'
+        return f'{self.cliente.nombre} - {emp} - {self.producto or "-"}'
