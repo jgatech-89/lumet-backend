@@ -49,11 +49,11 @@ class VendedorViewSet(viewsets.ModelViewSet):
     search_fields = ['nombre_completo', 'numero_identificacion']
 
     def get_queryset(self):
-        qs = Vendedor.objects.filter(deleted_at__isnull=True)
+        qs = Vendedor.objects.filter(fecha_elimina__isnull=True)
         estado = self.request.query_params.get('estado')
         if estado in ('1', '0'):
             qs = qs.filter(estado_vendedor=estado)
-        return qs.order_by('-created_at')
+        return qs.order_by('-fecha_registra')
 
     def get_serializer_class(self):
         if self.action == 'list':
@@ -61,11 +61,11 @@ class VendedorViewSet(viewsets.ModelViewSet):
         return VendedorSerializer
 
     def perform_create(self, serializer):
-        serializer.save(created_by=self.request.user)
+        serializer.save(usuario_registra=self.request.user)
 
     def perform_update(self, serializer):
         serializer.save(updated_by=self.request.user)
 
     def perform_destroy(self, instance):
-        instance.deleted_by = self.request.user
+        instance.usuario_elimina = self.request.user
         instance.delete()

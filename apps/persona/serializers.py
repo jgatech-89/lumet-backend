@@ -77,17 +77,17 @@ class VendedorSerializer(serializers.ModelSerializer):
             'numero_identificacion',
             'estado',
             'estado_vendedor',
-            'created_at',
-            'created_by',
+            'fecha_registra',
+            'usuario_registra',
             'updated_at',
             'updated_by',
-            'deleted_at',
-            'deleted_by',
+            'fecha_elimina',
+            'usuario_elimina',
         ]
         read_only_fields = [
-            'created_at', 'created_by',
+            'fecha_registra', 'usuario_registra',
             'updated_at', 'updated_by',
-            'deleted_at', 'deleted_by',
+            'fecha_elimina', 'usuario_elimina',
         ]
         validators = []
 
@@ -99,7 +99,7 @@ class VendedorSerializer(serializers.ModelSerializer):
             numero = numero if numero is not None else self.instance.numero_identificacion
         if tipo is not None and numero is not None:
             qs = Vendedor.objects.filter(
-                deleted_at__isnull=True,
+                fecha_elimina__isnull=True,
                 tipo_identificacion=tipo,
                 numero_identificacion=numero,
             )

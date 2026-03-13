@@ -47,3 +47,18 @@ TIPO_CAMPO = [
     ('checkbox', 'Checkbox'),
     ('textarea', 'Área de texto'),
 ]
+
+# Estado de venta: preparado para manejarse por select (configurable).
+ESTADO_VENTA = [
+    ('venta_iniciada', 'Venta iniciada'),
+    ('completada', 'Venta completada'),
+    ('cancelada', 'Venta cancelada'),
+    ('pospuesta', 'Venta pospuesta'),
+    ('pendiente', 'Venta pendiente'),
+]
+
+# Tipo de cliente: 1 = particular, 2 = empresa.
+TIPO_CLIENTE = [
+    ('1', 'Particular'),
+    ('2', 'Empresa'),
+]

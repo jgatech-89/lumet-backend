@@ -55,31 +55,32 @@ class Vendedor(models.Model):
     numero_identificacion = models.CharField(max_length=50, db_index=True)
     estado = models.CharField(max_length=20, choices=ESTADO, default='1')
     estado_vendedor = models.CharField(max_length=20, choices=ESTADO_VENDEDOR, default='1', verbose_name='Estado vendedor')
-    created_at = models.DateTimeField(auto_now_add=True)
-    created_by = models.ForeignKey('Persona', on_delete=models.SET_NULL, null=True, blank=True, related_name='vendedores_creados', verbose_name='Creado por',)
+    fecha_registra = models.DateTimeField(auto_now_add=True)
+    usuario_registra = models.ForeignKey('Persona', on_delete=models.SET_NULL, null=True, blank=True, related_name='vendedores_registrados', verbose_name='Usuario registra')
     updated_at = models.DateTimeField(auto_now=True)
-    updated_by = models.ForeignKey('Persona', on_delete=models.SET_NULL, null=True, blank=True, related_name='vendedores_actualizados', verbose_name='Actualizado por',)
-    deleted_at = models.DateTimeField(null=True, blank=True, editable=False)
-    deleted_by = models.ForeignKey('Persona', on_delete=models.SET_NULL, null=True, blank=True, related_name='vendedores_eliminados', verbose_name='Eliminado por',)
+    updated_by = models.ForeignKey('Persona', on_delete=models.SET_NULL, null=True, blank=True, related_name='vendedores_actualizados', verbose_name='Actualizado por')
+    fecha_elimina = models.DateTimeField(null=True, blank=True, editable=False)
+    usuario_elimina = models.ForeignKey('Persona', on_delete=models.SET_NULL, null=True, blank=True, related_name='vendedores_eliminados', verbose_name='Usuario elimina')
 
     class Meta:
-        ordering = ['-created_at']
+        ordering = ['-fecha_registra']
         verbose_name = 'Vendedor'
         verbose_name_plural = 'Vendedores'
         constraints = [
             models.UniqueConstraint(
                 fields=['tipo_identificacion', 'numero_identificacion'],
-                condition=models.Q(deleted_at__isnull=True),
+                condition=models.Q(fecha_elimina__isnull=True),
                 name='vendedor_tipo_num_id_uniq_activo',
             ),
         ]
 
     def delete(self, using=None, keep_parents=False):
-        """Eliminación lógica: marca deleted_at (deleted_by se asigna desde la vista)."""
-        self.deleted_at = timezone.now()
-        update_fields = ['deleted_at', 'updated_at']
-        if self.deleted_by_id is not None:
-            update_fields.append('deleted_by_id')
+        """Eliminación lógica: marca fecha_elimina y estado=0 (usuario_elimina se asigna desde la vista)."""
+        self.fecha_elimina = timezone.now()
+        self.estado = '0'
+        update_fields = ['fecha_elimina', 'estado', 'updated_at']
+        if self.usuario_elimina_id is not None:
+            update_fields.append('usuario_elimina_id')
         self.save(update_fields=update_fields)
 
     def __str__(self):

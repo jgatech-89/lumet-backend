@@ -14,8 +14,8 @@ class CampoAdmin(admin.ModelAdmin):
     list_filter = ['tipo', 'activo', 'estado', 'empresa', 'servicio']
     search_fields = ['nombre', 'placeholder', 'help_text']
     ordering = ['empresa', 'servicio', 'orden']
-    raw_id_fields = ['empresa', 'servicio', 'created_by', 'updated_by', 'deleted_by']
-    readonly_fields = ['created_at', 'updated_at', 'deleted_at']
+    raw_id_fields = ['empresa', 'servicio', 'usuario_registra', 'updated_by', 'usuario_elimina']
+    readonly_fields = ['fecha_registra', 'updated_at', 'fecha_elimina']
     inlines = [CampoOpcionInline]
 
 
