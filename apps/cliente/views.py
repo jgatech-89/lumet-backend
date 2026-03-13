@@ -30,7 +30,15 @@ from .filters import ClienteFilter
 
 
 def _estado_venta_cliente(cliente):
-    h = cliente.historial_estados_venta.filter(activo=True).first()
+    """Estado a nivel cliente: prefiere historial legacy (sin producto); si no, el primer activo."""
+    # Preferir legacy (cliente_empresa null) para no tomar el del último producto
+    h_legacy = next(
+        (x for x in cliente.historial_estados_venta.all() if x.cliente_empresa_id is None and x.activo),
+        None,
+    )
+    if h_legacy:
+        return h_legacy.estado or 'venta_iniciada'
+    h = next((x for x in cliente.historial_estados_venta.all() if x.activo), None)
     return h.estado if h else 'venta_iniciada'
 
 
@@ -47,7 +55,12 @@ def _vendedor_nombre_cliente(cliente):
 
 
 def _empresa_servicio_producto_para_cliente(cliente):
+    """
+    Devuelve empresa_nombre, servicio_nombre, producto para un cliente (primera relación
+    ClienteEmpresa o fallback desde cliente.servicio_id / cliente.producto). Útil para Excel.
+    """
     from apps.servicio.models import Servicio
+    # Prefetch ya trae cliente_empresas con estado='1' y select_related
     ce = next(iter(cliente.cliente_empresas.all()), None)
     if ce:
         return (
@@ -63,6 +76,7 @@ def _empresa_servicio_producto_para_cliente(cliente):
 
 
 def _formatear_estado_venta_legible(valor):
+    """Estado de venta en formato legible para Excel (ej. Venta Iniciada, Completada)."""
     if not valor or not str(valor).strip():
         return ''
     v = str(valor).strip().lower().replace('-', ' ')
@@ -81,7 +95,13 @@ def _formatear_estado_venta_legible(valor):
 
 
 def _productos_para_pdf(cliente):
+    """
+    Devuelve una lista de diccionarios con la información de cada producto del cliente
+    para generar una página del PDF por cada uno. Si no hay ClienteEmpresa, se arma
+    un producto a partir de cliente.servicio_id y cliente.producto.
+    """
     from apps.servicio.models import Servicio
+    # Usar prefetch (get_queryset ya incluye ClienteEmpresa con estado='1' y select_related)
     empresas = list(cliente.cliente_empresas.all())
     if empresas:
         return [
@@ -93,6 +113,7 @@ def _productos_para_pdf(cliente):
             }
             for ce in empresas
         ]
+    # Cliente sin ClienteEmpresa (registro antiguo): un solo “producto” con servicio/producto del cliente
     servicio = Servicio.objects.filter(id=cliente.servicio_id).select_related('empresa').first() if cliente.servicio_id else None
     empresa_nombre = servicio.empresa.nombre if servicio and servicio.empresa_id else '-'
     servicio_nombre = servicio.nombre if servicio else '-'
@@ -100,7 +121,85 @@ def _productos_para_pdf(cliente):
     return [{'empresa_nombre': empresa_nombre, 'servicio_nombre': servicio_nombre, 'producto': producto, 'tipo_cliente': '-'}]
 
 
+def _estado_venta_por_producto(cliente, cliente_empresa):
+    """Estado de venta del producto (ClienteEmpresa). Si cliente_empresa es None, usa estado a nivel cliente."""
+    if cliente_empresa:
+        # Historial de ESTE producto (prefetched)
+        for h in cliente_empresa.historial_estados_venta.all():
+            if h and h.activo:
+                return h.estado or 'venta_iniciada'
+        # Legacy: historial con cliente_empresa null (prefetched en cliente)
+        h_legacy = next((x for x in cliente.historial_estados_venta.all() if x.cliente_empresa_id is None and x.activo), None)
+        return h_legacy.estado if h_legacy else 'venta_iniciada'
+    return _estado_venta_cliente(cliente)
+
+
+def _nombre_persona(p):
+    """Nombre legible de una Persona (usuario_registra)."""
+    if not p:
+        return ''
+    return getattr(p, 'nombre_completo', None) or (f'{getattr(p, "first_name", "")} {getattr(p, "last_name", "")}'.strip()) or str(p)
+
+
+def _vendedor_por_producto(cliente, cliente_empresa):
+    """
+    Vendedor del producto. La fuente principal es ClienteEmpresa.vendedor (tabla cliente_empresa).
+    Fallbacks: historial del producto, legacy, usuario_registra del ce, formulario cliente.
+    """
+    if cliente_empresa:
+        # 1) Vendedor del producto en ClienteEmpresa (relación directa producto-vendedor)
+        if cliente_empresa.vendedor_id:
+            v = cliente_empresa.vendedor
+            return getattr(v, 'nombre_completo', None) or str(v) if v else ''
+        # 2) Historial activo de este producto -> usuario_registra
+        for h in cliente_empresa.historial_estados_venta.all():
+            if h and h.usuario_registra_id:
+                return _nombre_persona(h.usuario_registra)
+        # 3) Historial legacy (cliente_empresa null)
+        h_legacy = next((x for x in cliente.historial_estados_venta.all() if x.cliente_empresa_id is None and x.activo), None)
+        if h_legacy and h_legacy.usuario_registra_id:
+            return _nombre_persona(h_legacy.usuario_registra)
+        # 4) Quien registró este producto (al agregar producto)
+        if cliente_empresa.usuario_registra_id:
+            return _nombre_persona(cliente_empresa.usuario_registra)
+    return _vendedor_nombre_cliente(cliente) or ''
+
+
+def _productos_para_excel(cliente):
+    """
+    Lista de dicts por producto del cliente para Excel. Estado y vendedor son POR PRODUCTO:
+    del HistorialEstadoVenta de ese producto (cliente_empresa), no del último ni del cliente.
+    """
+    from apps.servicio.models import Servicio
+    empresas = list(cliente.cliente_empresas.all())
+    if empresas:
+        return [
+            {
+                'empresa_nombre': (ce.empresa.nombre if ce.empresa else ''),
+                'servicio_nombre': (ce.servicio.nombre if ce.servicio else ''),
+                'producto': ce.producto or '',
+                'estado_venta': _estado_venta_por_producto(cliente, ce),
+                'vendedor': _vendedor_por_producto(cliente, ce),
+            }
+            for ce in empresas
+        ]
+    servicio = Servicio.objects.filter(id=cliente.servicio_id).select_related('empresa').first() if cliente.servicio_id else None
+    empresa_nombre = servicio.empresa.nombre if servicio and servicio.empresa_id else ''
+    servicio_nombre = servicio.nombre if servicio else ''
+    producto = (cliente.producto or '').strip()
+    estado_venta = _estado_venta_cliente(cliente)
+    vendedor = _vendedor_nombre_cliente(cliente) or ''
+    return [{
+        'empresa_nombre': empresa_nombre,
+        'servicio_nombre': servicio_nombre,
+        'producto': producto,
+        'estado_venta': estado_venta,
+        'vendedor': vendedor,
+    }]
+
+
 def _estilo_tabla_base():
+    """Estilo común para tablas del PDF (bordes, padding, fuente)."""
     return [
         ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
         ('FONTSIZE', (0, 0), (-1, -1), 9),
@@ -114,9 +213,11 @@ def _estilo_tabla_base():
 
 
 def _formatear_estado_venta(valor):
+    """Convierte valor interno de estado de venta a texto en MAYÚSCULAS (ej. venta_iniciada → VENTA INICIADA)."""
     if not valor or not str(valor).strip():
         return '-'
     v = str(valor).strip().lower().replace('-', ' ')
+    # Mapeos conocidos en mayúsculas para consistencia con el resto del PDF
     mapeo = {
         'venta_iniciada': 'VENTA INICIADA',
         'venta iniciada': 'VENTA INICIADA',
@@ -128,24 +229,34 @@ def _formatear_estado_venta(valor):
     }
     if v in mapeo:
         return mapeo[v]
+    # Genérico: mayúsculas
     return ' '.join(p.upper() for p in v.split('_') if p)
 
 
 def _formatear_valor_campo(nombre_campo, valor, estado_venta_formateado=None, vendedor_nombre=None):
+    """
+    Formatea el valor de un campo para mostrarlo en el PDF.
+    - Estado de venta: usa estado_venta_formateado si se pasa (ej. "Venta Iniciada").
+    - Cambio de titular: 1, si, true → Sí; 0, no → No.
+    - Vendedor: si vendedor_nombre está dado, se muestra el nombre en lugar del ID.
+    """
     if valor is None:
         return '-'
     raw = str(valor).strip()
     norm_nombre = (nombre_campo or '').lower().replace(' ', '_').replace('-', ' ')
     if not raw and norm_nombre not in ('estado_venta', 'estado de venta', 'vendedor'):
         return '-'
+    # Estado de venta: usar el texto ya formateado (ej. Venta Iniciada)
     if 'estado' in norm_nombre and 'venta' in norm_nombre:
         if estado_venta_formateado is not None:
             return estado_venta_formateado
         return _formatear_estado_venta(raw)
+    # Vendedor: mostrar nombre resuelto si está disponible
     if norm_nombre == 'vendedor':
         if vendedor_nombre:
             return vendedor_nombre
         return raw if raw else '-'
+    # Cambio de titular: 1 = Sí, 0 = No
     if 'cambio' in norm_nombre and 'titular' in norm_nombre:
         if raw.lower() in ('1', 'si', 'sí', 'true', 'yes', 'verdadero'):
             return 'Sí'
@@ -158,6 +269,7 @@ def _formatear_valor_campo(nombre_campo, valor, estado_venta_formateado=None, ve
 
 
 def _formatear_etiqueta_campo(nombre_campo):
+    """Devuelve etiqueta legible en MAYÚSCULAS para consistencia (ej. tipo_cliente → TIPO DE CLIENTE)."""
     if not nombre_campo:
         return '-'
     s = str(nombre_campo).strip()
@@ -178,10 +290,21 @@ class ClienteViewSet(viewsets.ModelViewSet):
         qs = Cliente.objects.filter(estado='1').order_by('-fecha_registro')
         prefetch = [
             'respuestas_formulario',
-            'historial_estados_venta',
+            Prefetch(
+                'historial_estados_venta',
+                queryset=HistorialEstadoVenta.objects.select_related('usuario_registra'),
+            ),
             Prefetch(
                 'cliente_empresas',
-                queryset=ClienteEmpresa.objects.filter(estado='1').select_related('empresa', 'servicio').order_by('id'),
+                queryset=ClienteEmpresa.objects.filter(estado='1')
+                .select_related('empresa', 'servicio', 'usuario_registra', 'vendedor')
+                .prefetch_related(
+                    Prefetch(
+                        'historial_estados_venta',
+                        queryset=HistorialEstadoVenta.objects.filter(activo=True).select_related('usuario_registra'),
+                    )
+                )
+                .order_by('id'),
             ),
         ]
         qs = qs.prefetch_related(*prefetch)
@@ -245,61 +368,14 @@ class ClienteViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'], url_path='actualizar-producto')
     def actualizar_producto(self, request, pk=None):
-        """Actualiza un producto (ClienteEmpresa) existente. No modifica estado de venta."""
-        from apps.servicio.models import Servicio
+        """Actualiza un producto (ClienteEmpresa) existente, incluido el vendedor del producto."""
         cliente = self.get_object()
-        serializer = ClienteActualizarProductoSerializer(data=request.data)
+        serializer = ClienteActualizarProductoSerializer(
+            data=request.data,
+            context={'request': request, 'cliente': cliente},
+        )
         serializer.is_valid(raise_exception=True)
-        data = serializer.validated_data
-        ce_id = data.get('cliente_empresa_id')
-        try:
-            ce = ClienteEmpresa.objects.get(id=ce_id, cliente=cliente, estado='1')
-        except ClienteEmpresa.DoesNotExist:
-            return Response(
-                {'error': 'Producto no encontrado o no pertenece a este cliente.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        user = request.user
-        norm = lambda s: (s or '').lower().replace(' ', '_')
-        NOMBRES_ESTADO_VENTA = ['estado_venta', 'Estado de venta', 'Estado venta', 'estado venta']
-
-        if 'tipo_cliente' in data:
-            ce.tipo_cliente = (data.get('tipo_cliente') or '').strip()
-        if 'servicio_id' in data and data['servicio_id'] is not None:
-            ce.servicio_id = data['servicio_id']
-            servicio = Servicio.objects.filter(id=data['servicio_id']).first()
-            if servicio:
-                ce.empresa_id = servicio.empresa_id
-        if 'producto' in data:
-            ce.producto = (data.get('producto') or '').strip()
-
-        for item in data.get('respuestas', []):
-            nombre_campo = (item.get('nombre_campo') or '').strip()
-            if 'vendedor' in norm(nombre_campo):
-                try:
-                    ce.vendedor_id = int(str(item.get('respuesta_campo', '')).strip()) or None
-                except (ValueError, TypeError):
-                    ce.vendedor_id = None
-                break
-
-        ce.save()
-
-        for item in data.get('respuestas', []):
-            nombre_campo = item.get('nombre_campo', '')
-            respuesta_campo = str(item.get('respuesta_campo', ''))
-            if not nombre_campo:
-                continue
-            if any(norm(nombre_campo) == norm(n) for n in NOMBRES_ESTADO_VENTA):
-                continue
-            fc, created = FormularioCliente.objects.get_or_create(
-                cliente=cliente,
-                nombre_campo=nombre_campo,
-                defaults={'respuesta_campo': respuesta_campo, 'usuario_registra': user},
-            )
-            if not created and fc.respuesta_campo != respuesta_campo:
-                fc.respuesta_campo = respuesta_campo
-                fc.save()
-
+        serializer.save()
         return Response(
             {'mensaje': 'Producto actualizado correctamente.'},
             status=status.HTTP_200_OK,
@@ -308,31 +384,39 @@ class ClienteViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='cambiar-estado')
     def cambiar_estado(self, request, pk=None):
         """
-        Cambia el estado de venta de un producto del cliente.
-        Si cliente_empresa_id se envía, aplica a ese producto. Si no, usa el primer producto del cliente.
+        Cambia el estado de venta (y opcionalmente el vendedor) de un producto o del cliente.
+        - cliente_empresa_id: si se envía, actualiza el historial de ESE producto; si no, a nivel cliente (legacy).
+        - vendedor_id: opcional; id de Persona que quedará como usuario_registra en el historial.
         """
         cliente = self.get_object()
         nuevo_estado = (request.data.get('estado') or '').strip() or 'pendiente'
         cliente_empresa_id = request.data.get('cliente_empresa_id')
+        vendedor_id = request.data.get('vendedor_id')
         cliente_empresa = None
-        if cliente_empresa_id:
+        if cliente_empresa_id is not None:
             try:
-                ce = ClienteEmpresa.objects.get(
-                    id=cliente_empresa_id,
+                cliente_empresa = ClienteEmpresa.objects.get(
+                    pk=cliente_empresa_id,
                     cliente=cliente,
                     estado='1',
                 )
-                cliente_empresa = ce
-            except ClienteEmpresa.DoesNotExist:
+            except (ClienteEmpresa.DoesNotExist, ValueError, TypeError):
                 return Response(
-                    {'error': 'Producto no encontrado o no pertenece a este cliente.'},
+                    {'error': 'cliente_empresa_id no válido o no pertenece a este cliente.'},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-        else:
-            ce = cliente.cliente_empresas.filter(estado='1').first()
-            if ce:
-                cliente_empresa = ce
-        _cambiar_estado_venta(cliente, nuevo_estado, request.user, cliente_empresa=cliente_empresa)
+        usuario_registra = None
+        if vendedor_id is not None:
+            from apps.persona.models import Persona
+            try:
+                usuario_registra = Persona.objects.get(pk=vendedor_id)
+            except (Persona.DoesNotExist, ValueError, TypeError):
+                pass
+        _cambiar_estado_venta(
+            cliente, nuevo_estado, request.user,
+            cliente_empresa=cliente_empresa,
+            usuario_registra=usuario_registra,
+        )
         return Response({
             'mensaje': 'Estado actualizado correctamente.',
             'estado': nuevo_estado,
@@ -340,6 +424,11 @@ class ClienteViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['get'], url_path='descargar-pdf')
     def descargar_pdf(self, request, pk=None):
+        """
+        Genera un PDF con una página por cada producto del cliente.
+        Cada página incluye: datos del cliente, información del producto (empresa/servicio/producto)
+        y respuestas del formulario, con espacio reservado para contrato y firmas.
+        """
         cliente = self.get_object()
         productos = _productos_para_pdf(cliente)
         respuestas = sorted(
@@ -449,8 +538,8 @@ class ClienteViewSet(viewsets.ModelViewSet):
             # 2. EMPRESA Y PRODUCTO (relación cliente_empresas)
             elements.append(Paragraph('2. EMPRESA Y PRODUCTO ASOCIADO', section_style))
             datos_empresa = [
-                ['EMPRESA', prod['empresa_nombre']],
-                ['SERVICIO', prod['servicio_nombre']],
+                ['SERVICIO', prod['empresa_nombre']],
+                ['CONTRATISTA', prod['servicio_nombre']],
                 ['PRODUCTO', prod['producto']],
                 ['TIPO DE CLIENTE', prod['tipo_cliente']],
             ]
@@ -518,7 +607,12 @@ class ClienteViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='exportar-excel')
     def exportar_excel(self, request):
-        """Exporta clientes a Excel: una fila por cada producto del cliente, todo en MAYÚSCULAS."""
+        """
+        Exporta clientes a Excel: una fila por producto.
+        Columnas: NOMBRE, TIPO IDENTIFICACIÓN, NÚMERO IDENTIFICACIÓN, TELÉFONO, CORREO,
+        SERVICIO, CONTRATISTA, TIPO PRODUCTO, ESTADO VENTA, VENDEDOR.
+        Estado de venta y vendedor por producto. Datos del cliente unificados con merge vertical.
+        """
         queryset = self.filter_queryset(self.get_queryset())
         wb = Workbook()
         ws = wb.active
@@ -527,32 +621,56 @@ class ClienteViewSet(viewsets.ModelViewSet):
         def _mayus(s):
             return (s or '').strip().upper() if isinstance(s, str) else str(s or '').upper()
 
+        # SERVICIO = antes "Tipo de empresa"; CONTRATISTA = antes "Tipo de servicio"; orden: SERVICIO | CONTRATISTA | TIPO PRODUCTO
         headers = [
             'NOMBRE', 'TIPO IDENTIFICACIÓN', 'NÚMERO IDENTIFICACIÓN', 'TELÉFONO', 'CORREO',
-            'TIPO DE EMPRESA', 'TIPO DE PRODUCTO', 'TIPO DE SERVICIO',
+            'SERVICIO', 'CONTRATISTA', 'TIPO PRODUCTO',
             'ESTADO VENTA', 'VENDEDOR',
         ]
         ws.append(headers)
 
-        for c in queryset:
-            productos = _productos_para_pdf(c)
-            estado_raw = _estado_venta_cliente(c)
-            estado_venta = _formatear_estado_venta(estado_raw) if estado_raw else ''
-            vendedor = _vendedor_nombre_cliente(c) or ''
-            for prod in productos:
-                ws.append([
-                    _mayus(c.nombre),
-                    _mayus(c.tipo_identificacion),
-                    _mayus(c.numero_identificacion),
-                    _mayus(c.telefono),
-                    _mayus(c.correo),
-                    _mayus(prod['empresa_nombre']),
-                    _mayus(prod['producto']),
-                    _mayus(prod['servicio_nombre']),
-                    _mayus(estado_venta),
-                    _mayus(vendedor),
-                ])
+        # Rango de filas por cliente para merge (columnas 1-5)
+        merge_ranges = []  # [(start_row, end_row), ...]
+        data_row = 2
 
+        for c in queryset:
+            productos = _productos_para_excel(c)
+            start_row = data_row
+            for idx, prod in enumerate(productos):
+                estado_venta = _formatear_estado_venta(prod['estado_venta']) if prod.get('estado_venta') else ''
+                vendedor = prod.get('vendedor') or ''
+                if idx == 0:
+                    ws.append([
+                        _mayus(c.nombre),
+                        _mayus(c.tipo_identificacion),
+                        _mayus(c.numero_identificacion),
+                        _mayus(c.telefono),
+                        _mayus(c.correo),
+                        _mayus(prod['empresa_nombre']),
+                        _mayus(prod['servicio_nombre']),
+                        _mayus(prod['producto']),
+                        _mayus(estado_venta),
+                        _mayus(vendedor),
+                    ])
+                else:
+                    ws.append([
+                        '', '', '', '', '',
+                        _mayus(prod['empresa_nombre']),
+                        _mayus(prod['servicio_nombre']),
+                        _mayus(prod['producto']),
+                        _mayus(estado_venta),
+                        _mayus(vendedor),
+                    ])
+                data_row += 1
+            if len(productos) > 1:
+                merge_ranges.append((start_row, data_row - 1))
+
+        # Unificación visual: merge vertical de celdas de datos del cliente (columnas 1-5)
+        for start_row, end_row in merge_ranges:
+            for col in range(1, 6):
+                ws.merge_cells(start_row=start_row, start_column=col, end_row=end_row, end_column=col)
+
+        # Estilo profesional: encabezado en negrita y fondo
         header_fill = PatternFill(start_color='1e3a5f', end_color='1e3a5f', fill_type='solid')
         header_font = Font(bold=True, color='FFFFFF', size=11)
         thin_border = Border(

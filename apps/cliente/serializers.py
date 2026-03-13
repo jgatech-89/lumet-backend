@@ -10,11 +10,40 @@ class FormularioClienteSerializer(serializers.ModelSerializer):
         fields = ['nombre_campo', 'respuesta_campo']
 
 
+def _vendedor_nombre_por_cliente_empresa(cliente_empresa):
+    """Vendedor para un producto (ClienteEmpresa): historial activo, legacy o usuario_registra del ce."""
+    if not cliente_empresa:
+        return None
+    h = HistorialEstadoVenta.objects.filter(
+        cliente_empresa_id=cliente_empresa.pk,
+        activo=True,
+        estado_registro='1',
+    ).select_related('usuario_registra').order_by('-fecha_registra').first()
+    if h and h.usuario_registra_id:
+        p = h.usuario_registra
+        return getattr(p, 'nombre_completo', None) or (f'{getattr(p, "first_name", "")} {getattr(p, "last_name", "")}'.strip()) or str(p)
+    h_legacy = HistorialEstadoVenta.objects.filter(
+        cliente_id=cliente_empresa.cliente_id,
+        cliente_empresa__isnull=True,
+        activo=True,
+        estado_registro='1',
+    ).select_related('usuario_registra').order_by('-fecha_registra').first()
+    if h_legacy and h_legacy.usuario_registra_id:
+        p = h_legacy.usuario_registra
+        return getattr(p, 'nombre_completo', None) or (f'{getattr(p, "first_name", "")} {getattr(p, "last_name", "")}'.strip()) or str(p)
+    if cliente_empresa.usuario_registra_id:
+        p = cliente_empresa.usuario_registra
+        if p:
+            return getattr(p, 'nombre_completo', None) or (f'{getattr(p, "first_name", "")} {getattr(p, "last_name", "")}'.strip()) or str(p)
+    return None
+
+
 class ClienteEmpresaSerializer(serializers.ModelSerializer):
     empresa_nombre = serializers.CharField(source='empresa.nombre', read_only=True)
     servicio_nombre = serializers.CharField(source='servicio.nombre', read_only=True)
     vendedor_nombre = serializers.SerializerMethodField()
     estado_venta = serializers.SerializerMethodField()
+    vendedor_nombre = serializers.SerializerMethodField()
 
     class Meta:
         model = ClienteEmpresa
@@ -25,14 +54,17 @@ class ClienteEmpresaSerializer(serializers.ModelSerializer):
 
     def get_estado_venta(self, obj):
         h = HistorialEstadoVenta.objects.filter(
-            cliente_empresa=obj, activo=True
+            cliente_empresa=obj, activo=True, estado_registro='1'
         ).first()
         if h:
             return h.estado
         h_legacy = HistorialEstadoVenta.objects.filter(
-            cliente=obj.cliente, cliente_empresa__isnull=True, activo=True
+            cliente=obj.cliente, cliente_empresa__isnull=True, activo=True, estado_registro='1'
         ).first()
         return h_legacy.estado if h_legacy else 'venta_iniciada'
+
+    def get_vendedor_nombre(self, obj):
+        return _vendedor_nombre_por_cliente_empresa(obj) or ''
 
 
 class ClienteSerializer(serializers.ModelSerializer):
@@ -136,11 +168,14 @@ class ClienteUpdateSerializer(serializers.Serializer):
         return instance
 
 
-def _cambiar_estado_venta(cliente, nuevo_estado, user, cliente_empresa=None):
+def _cambiar_estado_venta(cliente, nuevo_estado, user, cliente_empresa=None, usuario_registra=None):
     """
     Desactiva el estado anterior y crea uno nuevo en HistorialEstadoVenta.
     Si cliente_empresa está definido, el estado se asocia al producto. Si no, al cliente (legacy).
+    usuario_registra: si se pasa (ej. vendedor asignado), se usa como usuario_registra del historial;
+    si no, se usa user (quien hace la petición).
     """
+    quien_registra = usuario_registra if usuario_registra is not None else user
     if cliente_empresa:
         HistorialEstadoVenta.objects.filter(
             cliente_empresa=cliente_empresa, activo=True
@@ -150,7 +185,7 @@ def _cambiar_estado_venta(cliente, nuevo_estado, user, cliente_empresa=None):
             cliente_empresa=cliente_empresa,
             estado=nuevo_estado or 'venta_iniciada',
             activo=True,
-            usuario_registra=user,
+            usuario_registra=quien_registra,
         )
     else:
         HistorialEstadoVenta.objects.filter(
@@ -161,7 +196,7 @@ def _cambiar_estado_venta(cliente, nuevo_estado, user, cliente_empresa=None):
             cliente_empresa=None,
             estado=nuevo_estado or 'venta_iniciada',
             activo=True,
-            usuario_registra=user,
+            usuario_registra=quien_registra,
         )
 
 
@@ -474,7 +509,7 @@ class ClienteAgregarProductoSerializer(serializers.Serializer):
 
 
 class ClienteActualizarProductoSerializer(serializers.Serializer):
-    """Actualiza un producto (ClienteEmpresa) existente. No modifica estado de venta."""
+    """Actualiza un producto (ClienteEmpresa) existente, incluido vendedor_id por producto."""
     cliente_empresa_id = serializers.IntegerField()
     tipo_cliente = serializers.CharField(required=False, allow_blank=True, default='')
     servicio_id = serializers.IntegerField(required=False, allow_null=True)
@@ -493,3 +528,58 @@ class ClienteActualizarProductoSerializer(serializers.Serializer):
         except Servicio.DoesNotExist:
             raise serializers.ValidationError('Servicio no válido o inactivo.')
         return value
+
+    def validate(self, attrs):
+        cliente = self.context.get('cliente')
+        ce_id = attrs.get('cliente_empresa_id')
+        if not cliente or not ce_id:
+            return attrs
+        try:
+            ce = ClienteEmpresa.objects.get(pk=ce_id, cliente=cliente, estado='1')
+        except ClienteEmpresa.DoesNotExist:
+            raise serializers.ValidationError({'cliente_empresa_id': 'Producto no encontrado o no pertenece a este cliente.'})
+        attrs['_ce'] = ce
+        return attrs
+
+    def save(self, **kwargs):
+        cliente = self.context['cliente']
+        user = self.context['request'].user
+        ce = self.validated_data.get('_ce')
+        if not ce:
+            raise serializers.ValidationError('Producto no encontrado.')
+        norm = lambda s: (s or '').lower().replace(' ', '_')
+        # Campos directos
+        if 'tipo_cliente' in self.validated_data:
+            ce.tipo_cliente = (self.validated_data.get('tipo_cliente') or '').strip()
+        if 'servicio_id' in self.validated_data and self.validated_data['servicio_id'] is not None:
+            ce.servicio_id = self.validated_data['servicio_id']
+        if 'producto' in self.validated_data:
+            ce.producto = (self.validated_data.get('producto') or '').strip()
+        # Vendedor del producto desde respuestas (guardar en ClienteEmpresa.vendedor_id)
+        respuestas = self.validated_data.get('respuestas') or []
+        vendedor_id_val = None
+        for item in respuestas:
+            nombre = (item.get('nombre_campo') or '').strip()
+            if 'vendedor' in norm(nombre):
+                try:
+                    vendedor_id_val = int(str(item.get('respuesta_campo', '')).strip())
+                except (ValueError, TypeError):
+                    vendedor_id_val = None
+                break
+        ce.vendedor_id = vendedor_id_val
+        ce.save()
+        # Resto de respuestas -> FormularioCliente (cliente-level)
+        for item in respuestas:
+            nombre_campo = item.get('nombre_campo', '')
+            respuesta_campo = str(item.get('respuesta_campo', ''))
+            if not nombre_campo or 'vendedor' in norm(nombre_campo):
+                continue
+            fc, created = FormularioCliente.objects.get_or_create(
+                cliente=cliente,
+                nombre_campo=nombre_campo,
+                defaults={'respuesta_campo': respuesta_campo, 'usuario_registra': user},
+            )
+            if not created and fc.respuesta_campo != respuesta_campo:
+                fc.respuesta_campo = respuesta_campo
+                fc.save()
+        return ce
