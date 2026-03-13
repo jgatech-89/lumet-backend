@@ -24,11 +24,21 @@ class CampoReadSerializer(serializers.ModelSerializer):
     servicio_nombre = serializers.SerializerMethodField()
 
     def get_empresa_nombre(self, obj):
-        return obj.empresa.nombre if obj.empresa else 'Todas las empresas'
+        # En UI se muestra en la columna "Servicio"
+        # Si no hay empresa asociada (aplica a todos), mostramos "Todos los servicios".
+        return obj.empresa.nombre if obj.empresa else 'Todos los servicios'
     opciones = CampoOpcionNestedSerializer(many=True, read_only=True)
 
     def get_servicio_nombre(self, obj):
-        return obj.servicio.nombre if obj.servicio else ('Todos los servicios' if obj.empresa else 'Todas las empresas y servicios')
+        # En UI se muestra en la columna "Contratista"
+        # - Si hay servicio concreto: su nombre.
+        # - Si hay empresa pero no servicio: todos los contratistas de ese servicio.
+        # - Si tampoco hay empresa (aplica global): todos los servicios y contratistas.
+        if obj.servicio:
+            return obj.servicio.nombre
+        if obj.empresa:
+            return 'Todos los contratistas'
+        return 'Todos los servicios y contratistas'
 
     class Meta:
         model = Campo
@@ -43,8 +53,6 @@ class CampoReadSerializer(serializers.ModelSerializer):
             'producto',
             'placeholder',
             'orden',
-            'help_text',
-            'default_value',
             'visible_si',
             'requerido',
             'activo',
@@ -94,8 +102,6 @@ class CampoWriteSerializer(serializers.ModelSerializer):
             'producto',
             'placeholder',
             'orden',
-            'help_text',
-            'default_value',
             'visible_si',
             'requerido',
             'activo',
@@ -134,8 +140,6 @@ class FormularioCampoSerializer(serializers.ModelSerializer):
             'nombre',
             'tipo',
             'placeholder',
-            'help_text',
-            'default_value',
             'requerido',
             'visible_si',
             'opciones',

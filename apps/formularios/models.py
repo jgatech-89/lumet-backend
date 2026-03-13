@@ -35,8 +35,6 @@ class Campo(models.Model):
     )
     placeholder = models.CharField(max_length=255, blank=True, default='')
     orden = models.PositiveIntegerField(default=0)
-    help_text = models.CharField(max_length=500, blank=True, default='')
-    default_value = models.CharField(max_length=500, blank=True, default='')
     visible_si = models.CharField(max_length=500, blank=True, default='', help_text='Condición opcional para mostrar el campo según el valor de otro (uso futuro).')
     requerido = models.BooleanField(default=False)
     activo = models.BooleanField(default=True)

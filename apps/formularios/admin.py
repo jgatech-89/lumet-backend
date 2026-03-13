@@ -12,7 +12,7 @@ class CampoOpcionInline(admin.TabularInline):
 class CampoAdmin(admin.ModelAdmin):
     list_display = ['nombre', 'tipo', 'empresa', 'servicio', 'orden', 'requerido', 'activo', 'estado']
     list_filter = ['tipo', 'activo', 'estado', 'empresa', 'servicio']
-    search_fields = ['nombre', 'placeholder', 'help_text']
+    search_fields = ['nombre', 'placeholder']
     ordering = ['empresa', 'servicio', 'orden']
     raw_id_fields = ['empresa', 'servicio', 'usuario_registra', 'updated_by', 'usuario_elimina']
     readonly_fields = ['fecha_registra', 'updated_at', 'fecha_elimina']
