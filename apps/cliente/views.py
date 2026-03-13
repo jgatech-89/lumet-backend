@@ -23,6 +23,7 @@ from .serializers import (
     ClienteDetalleSerializer,
     ClienteUpdateSerializer,
     ClienteAgregarProductoSerializer,
+    ClienteActualizarProductoSerializer,
     _cambiar_estado_venta,
 )
 from .filters import ClienteFilter
@@ -240,6 +241,58 @@ class ClienteViewSet(viewsets.ModelViewSet):
         return Response(
             {'mensaje': 'Producto agregado correctamente.'},
             status=status.HTTP_201_CREATED,
+        )
+
+    @action(detail=True, methods=['post'], url_path='actualizar-producto')
+    def actualizar_producto(self, request, pk=None):
+        """Actualiza un producto (ClienteEmpresa) existente. No modifica estado de venta."""
+        from apps.servicio.models import Servicio
+        cliente = self.get_object()
+        serializer = ClienteActualizarProductoSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        ce_id = data.get('cliente_empresa_id')
+        try:
+            ce = ClienteEmpresa.objects.get(id=ce_id, cliente=cliente, estado='1')
+        except ClienteEmpresa.DoesNotExist:
+            return Response(
+                {'error': 'Producto no encontrado o no pertenece a este cliente.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        user = request.user
+        norm = lambda s: (s or '').lower().replace(' ', '_')
+        NOMBRES_ESTADO_VENTA = ['estado_venta', 'Estado de venta', 'Estado venta', 'estado venta']
+
+        if 'tipo_cliente' in data:
+            ce.tipo_cliente = (data.get('tipo_cliente') or '').strip()
+        if 'servicio_id' in data and data['servicio_id'] is not None:
+            ce.servicio_id = data['servicio_id']
+            servicio = Servicio.objects.filter(id=data['servicio_id']).first()
+            if servicio:
+                ce.empresa_id = servicio.empresa_id
+        if 'producto' in data:
+            ce.producto = (data.get('producto') or '').strip()
+        ce.save()
+
+        for item in data.get('respuestas', []):
+            nombre_campo = item.get('nombre_campo', '')
+            respuesta_campo = str(item.get('respuesta_campo', ''))
+            if not nombre_campo:
+                continue
+            if any(norm(nombre_campo) == norm(n) for n in NOMBRES_ESTADO_VENTA):
+                continue
+            fc, created = FormularioCliente.objects.get_or_create(
+                cliente=cliente,
+                nombre_campo=nombre_campo,
+                defaults={'respuesta_campo': respuesta_campo, 'usuario_registra': user},
+            )
+            if not created and fc.respuesta_campo != respuesta_campo:
+                fc.respuesta_campo = respuesta_campo
+                fc.save()
+
+        return Response(
+            {'mensaje': 'Producto actualizado correctamente.'},
+            status=status.HTTP_200_OK,
         )
 
     @action(detail=True, methods=['post'], url_path='cambiar-estado')

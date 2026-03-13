@@ -428,3 +428,25 @@ class ClienteAgregarProductoSerializer(serializers.Serializer):
                     fc.save()
 
         return ce
+
+
+class ClienteActualizarProductoSerializer(serializers.Serializer):
+    """Actualiza un producto (ClienteEmpresa) existente. No modifica estado de venta."""
+    cliente_empresa_id = serializers.IntegerField()
+    tipo_cliente = serializers.CharField(required=False, allow_blank=True, default='')
+    servicio_id = serializers.IntegerField(required=False, allow_null=True)
+    producto = serializers.CharField(required=False, allow_blank=True, default='')
+    respuestas = serializers.ListField(
+        child=serializers.DictField(child=serializers.CharField()),
+        required=False,
+        default=list,
+    )
+
+    def validate_servicio_id(self, value):
+        if value is None:
+            return value
+        try:
+            Servicio.objects.get(id=value, estado='1')
+        except Servicio.DoesNotExist:
+            raise serializers.ValidationError('Servicio no válido o inactivo.')
+        return value
