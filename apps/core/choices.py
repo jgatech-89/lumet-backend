@@ -6,6 +6,7 @@ Choices centralizados del sistema.
 TIPO_IDENTIFICACION = [
     ('CC', 'Cédula de ciudadanía'),
     ('CE', 'Cédula de extranjería'),
+    ('DNI', 'DNI'),
     ('NIT', 'NIT'),
     ('PAS', 'Pasaporte'),
     ('PPT', 'Permiso provisional de trabajo'),

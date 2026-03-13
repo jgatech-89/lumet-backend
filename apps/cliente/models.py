@@ -47,11 +47,19 @@ class Cliente(models.Model):
 
 
 class HistorialEstadoVenta(models.Model):
-    """Historial de estados de venta por cliente. Solo uno activo por cliente."""
+    """Historial de estados de venta por producto (cliente_empresa). Solo uno activo por cliente_empresa."""
     cliente = models.ForeignKey(
         Cliente,
         on_delete=models.CASCADE,
         related_name='historial_estados_venta',
+    )
+    cliente_empresa = models.ForeignKey(
+        'ClienteEmpresa',
+        on_delete=models.CASCADE,
+        related_name='historial_estados_venta',
+        null=True,
+        blank=True,
+        help_text='Producto específico. Si es null, aplica al cliente (legacy).',
     )
     estado = models.CharField(max_length=50, help_text='Valor del estado de venta: pendiente, completada, etc.')
     estado_registro = models.CharField(max_length=20, choices=ESTADO, default='1', help_text='1=activo, 0=eliminado')

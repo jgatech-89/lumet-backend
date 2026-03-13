@@ -10,6 +10,27 @@ class FormularioClienteSerializer(serializers.ModelSerializer):
         fields = ['nombre_campo', 'respuesta_campo']
 
 
+class ClienteEmpresaSerializer(serializers.ModelSerializer):
+    empresa_nombre = serializers.CharField(source='empresa.nombre', read_only=True)
+    servicio_nombre = serializers.CharField(source='servicio.nombre', read_only=True)
+    estado_venta = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ClienteEmpresa
+        fields = ['id', 'tipo_cliente', 'empresa', 'empresa_nombre', 'servicio', 'servicio_nombre', 'producto', 'estado_venta', 'fecha_registra']
+
+    def get_estado_venta(self, obj):
+        h = HistorialEstadoVenta.objects.filter(
+            cliente_empresa=obj, activo=True
+        ).first()
+        if h:
+            return h.estado
+        h_legacy = HistorialEstadoVenta.objects.filter(
+            cliente=obj.cliente, cliente_empresa__isnull=True, activo=True
+        ).first()
+        return h_legacy.estado if h_legacy else 'venta_iniciada'
+
+
 class ClienteSerializer(serializers.ModelSerializer):
     estado_venta = serializers.SerializerMethodField()
     vendedor_nombre = serializers.SerializerMethodField()
@@ -52,12 +73,13 @@ class ClienteSerializer(serializers.ModelSerializer):
 
 
 class ClienteDetalleSerializer(ClienteSerializer):
-    """Serializer para detalle con respuestas del formulario y servicio_empresa_id."""
+    """Serializer para detalle con respuestas del formulario, servicio_empresa_id y cliente_empresas."""
     respuestas = FormularioClienteSerializer(source='respuestas_formulario', many=True, read_only=True)
     servicio_empresa_id = serializers.SerializerMethodField()
+    cliente_empresas = ClienteEmpresaSerializer(many=True, read_only=True)
 
     class Meta(ClienteSerializer.Meta):
-        fields = ClienteSerializer.Meta.fields + ['respuestas', 'servicio_empresa_id']
+        fields = ClienteSerializer.Meta.fields + ['respuestas', 'servicio_empresa_id', 'cliente_empresas']
 
     def get_servicio_empresa_id(self, obj):
         if obj.servicio_id:
@@ -110,15 +132,33 @@ class ClienteUpdateSerializer(serializers.Serializer):
         return instance
 
 
-def _cambiar_estado_venta(cliente, nuevo_estado, user):
-    """Desactiva el estado anterior y crea uno nuevo en HistorialEstadoVenta."""
-    HistorialEstadoVenta.objects.filter(cliente=cliente, activo=True).update(activo=False)
-    HistorialEstadoVenta.objects.create(
-        cliente=cliente,
-        estado=nuevo_estado or 'venta_iniciada',
-        activo=True,
-        usuario_registra=user,
-    )
+def _cambiar_estado_venta(cliente, nuevo_estado, user, cliente_empresa=None):
+    """
+    Desactiva el estado anterior y crea uno nuevo en HistorialEstadoVenta.
+    Si cliente_empresa está definido, el estado se asocia al producto. Si no, al cliente (legacy).
+    """
+    if cliente_empresa:
+        HistorialEstadoVenta.objects.filter(
+            cliente_empresa=cliente_empresa, activo=True
+        ).update(activo=False)
+        HistorialEstadoVenta.objects.create(
+            cliente=cliente,
+            cliente_empresa=cliente_empresa,
+            estado=nuevo_estado or 'venta_iniciada',
+            activo=True,
+            usuario_registra=user,
+        )
+    else:
+        HistorialEstadoVenta.objects.filter(
+            cliente=cliente, cliente_empresa__isnull=True, activo=True
+        ).update(activo=False)
+        HistorialEstadoVenta.objects.create(
+            cliente=cliente,
+            cliente_empresa=None,
+            estado=nuevo_estado or 'venta_iniciada',
+            activo=True,
+            usuario_registra=user,
+        )
 
 
 class ClienteCreateSerializer(serializers.Serializer):
@@ -228,14 +268,7 @@ class ClienteCreateSerializer(serializers.Serializer):
                     usuario_registra=user
                 )
 
-        HistorialEstadoVenta.objects.create(
-            cliente=cliente,
-            estado=estado_inicial,
-            activo=True,
-            usuario_registra=user,
-        )
-
-        # Guardar en ClienteEmpresa: centraliza relación cliente + tipo_cliente + empresa + producto/servicio
+        # Crear ClienteEmpresa primero para asociar el estado de venta al producto
         NOMBRES_TIPO_CLIENTE = ['tipo_cliente', 'Tipo de cliente', 'Tipo Cliente', 'tipo cliente']
         tipo_cliente_val = ''
         for item in respuestas:
@@ -245,13 +278,21 @@ class ClienteCreateSerializer(serializers.Serializer):
                 break
         servicio = Servicio.objects.filter(id=cliente.servicio_id).first()
         empresa_id = servicio.empresa_id if servicio else None
-        ClienteEmpresa.objects.create(
+        ce = ClienteEmpresa.objects.create(
             cliente=cliente,
             tipo_cliente=tipo_cliente_val,
             empresa_id=empresa_id,
             servicio_id=cliente.servicio_id,
             producto=producto or '',
             formulario_id=None,
+            usuario_registra=user,
+        )
+
+        HistorialEstadoVenta.objects.create(
+            cliente=cliente,
+            cliente_empresa=ce,
+            estado=estado_inicial,
+            activo=True,
             usuario_registra=user,
         )
         return cliente
@@ -340,26 +381,12 @@ class ClienteAgregarProductoSerializer(serializers.Serializer):
 
         NOMBRES_ESTADO_VENTA = ['estado_venta', 'Estado de venta', 'Estado venta', 'estado venta']
         norm = lambda s: (s or '').lower().replace(' ', '_')
-
-        # Al agregar producto nuevo, establecer estado de venta a venta_iniciada
-        _cambiar_estado_venta(cliente, 'venta_iniciada', user)
-
+        estado_nuevo_producto = 'venta_iniciada'
         for item in respuestas:
             nombre_campo = item.get('nombre_campo', '')
-            respuesta_campo = str(item.get('respuesta_campo', ''))
-            if not nombre_campo:
-                continue
             if any(norm(nombre_campo) == norm(n) for n in NOMBRES_ESTADO_VENTA):
-                _cambiar_estado_venta(cliente, (respuesta_campo or '').strip() or 'venta_iniciada', user)
-            else:
-                fc, created = FormularioCliente.objects.get_or_create(
-                    cliente=cliente,
-                    nombre_campo=nombre_campo,
-                    defaults={'respuesta_campo': respuesta_campo, 'usuario_registra': user}
-                )
-                if not created and fc.respuesta_campo != respuesta_campo:
-                    fc.respuesta_campo = respuesta_campo
-                    fc.save()
+                estado_nuevo_producto = (item.get('respuesta_campo') or '').strip() or estado_nuevo_producto
+                break
 
         servicio = Servicio.objects.filter(id=servicio_id).first()
         empresa_id = servicio.empresa_id if servicio else None
@@ -371,7 +398,7 @@ class ClienteAgregarProductoSerializer(serializers.Serializer):
                 tipo_cliente_val = str(item.get('respuesta_campo', '')).strip()
                 break
 
-        ClienteEmpresa.objects.create(
+        ce = ClienteEmpresa.objects.create(
             cliente=cliente,
             tipo_cliente=tipo_cliente_val,
             empresa_id=empresa_id,
@@ -380,4 +407,24 @@ class ClienteAgregarProductoSerializer(serializers.Serializer):
             formulario_id=None,
             usuario_registra=user,
         )
-        return cliente
+
+        _cambiar_estado_venta(cliente, estado_nuevo_producto, user, cliente_empresa=ce)
+
+        for item in respuestas:
+            nombre_campo = item.get('nombre_campo', '')
+            respuesta_campo = str(item.get('respuesta_campo', ''))
+            if not nombre_campo:
+                continue
+            if any(norm(nombre_campo) == norm(n) for n in NOMBRES_ESTADO_VENTA):
+                pass  # ya manejado arriba con cliente_empresa
+            else:
+                fc, created = FormularioCliente.objects.get_or_create(
+                    cliente=cliente,
+                    nombre_campo=nombre_campo,
+                    defaults={'respuesta_campo': respuesta_campo, 'usuario_registra': user}
+                )
+                if not created and fc.respuesta_campo != respuesta_campo:
+                    fc.respuesta_campo = respuesta_campo
+                    fc.save()
+
+        return ce

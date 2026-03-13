@@ -244,10 +244,32 @@ class ClienteViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'], url_path='cambiar-estado')
     def cambiar_estado(self, request, pk=None):
-        """Cambia el estado de venta del cliente. Desactiva el anterior y crea uno nuevo."""
+        """
+        Cambia el estado de venta de un producto del cliente.
+        Si cliente_empresa_id se envía, aplica a ese producto. Si no, usa el primer producto del cliente.
+        """
         cliente = self.get_object()
         nuevo_estado = (request.data.get('estado') or '').strip() or 'pendiente'
-        _cambiar_estado_venta(cliente, nuevo_estado, request.user)
+        cliente_empresa_id = request.data.get('cliente_empresa_id')
+        cliente_empresa = None
+        if cliente_empresa_id:
+            try:
+                ce = ClienteEmpresa.objects.get(
+                    id=cliente_empresa_id,
+                    cliente=cliente,
+                    estado='1',
+                )
+                cliente_empresa = ce
+            except ClienteEmpresa.DoesNotExist:
+                return Response(
+                    {'error': 'Producto no encontrado o no pertenece a este cliente.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        else:
+            ce = cliente.cliente_empresas.filter(estado='1').first()
+            if ce:
+                cliente_empresa = ce
+        _cambiar_estado_venta(cliente, nuevo_estado, request.user, cliente_empresa=cliente_empresa)
         return Response({
             'mensaje': 'Estado actualizado correctamente.',
             'estado': nuevo_estado,
