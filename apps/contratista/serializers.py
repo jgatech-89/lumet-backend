@@ -1,20 +1,9 @@
 from rest_framework import serializers
-from .models import Empresa
-
-
-class EmpresaMinimalSerializer(serializers.ModelSerializer):
-    """Solo id y nombre, para selectores (ej. modal añadir campo)."""
-    class Meta:
-        model = Empresa
-        fields = ['id', 'nombre']
+from apps.servicio.models import Servicio
+from .models import Contratista
 
 
 def _nombre_persona(persona):
-    """
-    Construye el nombre completo de la Persona concatenando:
-    primer_nombre, segundo_nombre, primer_apellido, segundo_apellido.
-    Si todo está vacío, devuelve username como fallback.
-    """
     if persona is None:
         return None
     partes = [
@@ -29,16 +18,15 @@ def _nombre_persona(persona):
     return persona.username or str(persona.pk)
 
 
-class EmpresaSerializer(serializers.ModelSerializer):
-    # Estado mostrado: Activa/Inactiva según estado_empresa (como Vendedor)
-    estado = serializers.SerializerMethodField()
-
-    # Campos descriptivos (texto): nombre completo o username como fallback
+class ContratistaSerializer(serializers.ModelSerializer):
+    servicio_nombre = serializers.SerializerMethodField()
+    servicio_id = serializers.PrimaryKeyRelatedField(
+        queryset=Servicio.objects.filter(estado='1'),
+        source='servicio',
+    )
     usuario_registra_nombre = serializers.SerializerMethodField()
     usuario_edita_nombre = serializers.SerializerMethodField()
     usuario_elimina_nombre = serializers.SerializerMethodField()
-
-    # IDs explícitos (pueden ser null)
     usuario_registra_id = serializers.PrimaryKeyRelatedField(
         source='usuario_registra', read_only=True, allow_null=True
     )
@@ -50,12 +38,14 @@ class EmpresaSerializer(serializers.ModelSerializer):
     )
 
     class Meta:
-        model = Empresa
+        model = Contratista
         fields = [
             'id',
             'nombre',
             'estado',
-            'estado_empresa',
+            'estado_contratista',
+            'servicio_id',
+            'servicio_nombre',
             'usuario_registra_id',
             'usuario_registra_nombre',
             'usuario_edita_id',
@@ -75,9 +65,8 @@ class EmpresaSerializer(serializers.ModelSerializer):
             'fecha_elimina',
         ]
 
-    def get_estado(self, obj):
-        """Devuelve Activa/Inactiva según estado_empresa (como Vendedor)."""
-        return 'Activa' if obj.estado_empresa == '1' else 'Inactiva'
+    def get_servicio_nombre(self, obj):
+        return obj.servicio.nombre if obj.servicio else None
 
     def get_usuario_registra_nombre(self, obj):
         return _nombre_persona(obj.usuario_registra)
@@ -88,11 +77,23 @@ class EmpresaSerializer(serializers.ModelSerializer):
     def get_usuario_elimina_nombre(self, obj):
         return _nombre_persona(obj.usuario_elimina)
 
-    def validate_nombre(self, value):
-        """Evita duplicados solo entre empresas no eliminadas (estado=1)."""
-        queryset = Empresa.objects.filter(nombre__iexact=value, estado='1')
+    def validate(self, attrs):
+        """
+        No permitir mismo nombre en el mismo servicio si ya existe un contratista ACTIVO (estado=1).
+        """
+        nombre = attrs.get('nombre')
+        servicio = attrs.get('servicio')
+        if not nombre or not servicio:
+            return attrs
+        qs = Contratista.objects.filter(
+            nombre__iexact=nombre.strip(),
+            servicio=servicio,
+            estado='1',
+        )
         if self.instance:
-            queryset = queryset.exclude(pk=self.instance.pk)
-        if queryset.exists():
-            raise serializers.ValidationError("Ya existe una empresa con este nombre.")
-        return value
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError({
+                'nombre': 'Ya existe un contratista activo con este nombre en el servicio.',
+            })
+        return attrs

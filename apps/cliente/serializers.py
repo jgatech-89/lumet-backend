@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from apps.servicio.models import Servicio
+from apps.contratista.models import Contratista
 from apps.formularios.services import get_campos_formulario
 from .models import Cliente, FormularioCliente, HistorialEstadoVenta, ClienteEmpresa
 
@@ -39,15 +40,14 @@ def _vendedor_nombre_por_cliente_empresa(cliente_empresa):
 
 
 class ClienteEmpresaSerializer(serializers.ModelSerializer):
-    empresa_nombre = serializers.CharField(source='empresa.nombre', read_only=True)
     servicio_nombre = serializers.CharField(source='servicio.nombre', read_only=True)
+    contratista_nombre = serializers.CharField(source='contratista.nombre', read_only=True)
     vendedor_nombre = serializers.SerializerMethodField()
     estado_venta = serializers.SerializerMethodField()
-    vendedor_nombre = serializers.SerializerMethodField()
 
     class Meta:
         model = ClienteEmpresa
-        fields = ['id', 'tipo_cliente', 'empresa', 'empresa_nombre', 'servicio', 'servicio_nombre', 'producto', 'vendedor', 'vendedor_nombre', 'estado_venta', 'fecha_registra']
+        fields = ['id', 'tipo_cliente', 'servicio', 'servicio_nombre', 'contratista', 'contratista_nombre', 'producto', 'vendedor', 'vendedor_nombre', 'estado_venta', 'fecha_registra']
 
     def get_vendedor_nombre(self, obj):
         return (obj.vendedor.nombre_completo if obj.vendedor else None) if obj.vendedor_id else None
@@ -83,7 +83,7 @@ class ClienteSerializer(serializers.ModelSerializer):
             'estado',
             'estado_venta',
             'vendedor_nombre',
-            'servicio_id',
+            'contratista_id',
             'producto',
             'usuario_registra',
             'fecha_registro',
@@ -109,19 +109,20 @@ class ClienteSerializer(serializers.ModelSerializer):
 
 
 class ClienteDetalleSerializer(ClienteSerializer):
-    """Serializer para detalle con respuestas del formulario, servicio_empresa_id y cliente_empresas."""
+    """Serializer para detalle con respuestas del formulario, servicio_id (del contratista) y cliente_empresas."""
     respuestas = FormularioClienteSerializer(source='respuestas_formulario', many=True, read_only=True)
-    servicio_empresa_id = serializers.SerializerMethodField()
+    servicio_id = serializers.SerializerMethodField()
     cliente_empresas = ClienteEmpresaSerializer(many=True, read_only=True)
 
     class Meta(ClienteSerializer.Meta):
-        fields = ClienteSerializer.Meta.fields + ['respuestas', 'servicio_empresa_id', 'cliente_empresas']
+        fields = ClienteSerializer.Meta.fields + ['respuestas', 'servicio_id', 'cliente_empresas']
 
-    def get_servicio_empresa_id(self, obj):
-        if obj.servicio_id:
+    def get_servicio_id(self, obj):
+        """ID del Servicio (ex-Empresa) asociado al contratista del cliente."""
+        if obj.contratista_id:
             try:
-                return Servicio.objects.get(id=obj.servicio_id).empresa_id
-            except Servicio.DoesNotExist:
+                return Contratista.objects.get(id=obj.contratista_id).servicio_id
+            except Contratista.DoesNotExist:
                 return None
         return None
 
@@ -202,7 +203,8 @@ def _cambiar_estado_venta(cliente, nuevo_estado, user, cliente_empresa=None, usu
 
 class ClienteCreateSerializer(serializers.Serializer):
     """Serializer para crear cliente + respuestas del formulario en una sola petición."""
-    servicio_id = serializers.IntegerField()
+    servicio_id = serializers.IntegerField(help_text='ID del Servicio (ex-Empresa)')
+    contratista_id = serializers.IntegerField(help_text='ID del Contratista (ex-Servicio)')
     producto = serializers.CharField(max_length=255, required=False, allow_blank=True)
     nombre = serializers.CharField(max_length=255)
     tipo_identificacion = serializers.CharField(max_length=10, required=False, allow_blank=True)
@@ -217,21 +219,25 @@ class ClienteCreateSerializer(serializers.Serializer):
     )
 
     def validate(self, attrs):
-        """Valida que las respuestas correspondan a los campos del formulario del servicio y producto seleccionados."""
+        """Valida que las respuestas correspondan a los campos del formulario del servicio/contratista y producto seleccionados."""
         servicio_id = attrs.get('servicio_id')
+        contratista_id = attrs.get('contratista_id')
         respuestas = attrs.get('respuestas', [])
         producto = (attrs.get('producto') or '').strip() or None
 
-        if not servicio_id:
+        if not servicio_id or not contratista_id:
             return attrs
 
         try:
-            servicio = Servicio.objects.get(id=servicio_id, estado='1')
+            Servicio.objects.get(id=servicio_id, estado='1')
         except Servicio.DoesNotExist:
             raise serializers.ValidationError({'servicio_id': 'Servicio no válido o inactivo.'})
+        try:
+            Contratista.objects.get(id=contratista_id, servicio_id=servicio_id, estado='1')
+        except Contratista.DoesNotExist:
+            raise serializers.ValidationError({'contratista_id': 'Contratista no válido o no pertenece al servicio.'})
 
-        empresa_id = servicio.empresa_id
-        campos = list(get_campos_formulario(empresa_id, servicio_id, producto))
+        campos = list(get_campos_formulario(servicio_id, contratista_id, producto))
         nombres_campos = {c.nombre for c in campos}
         respuestas_por_campo = {item.get('nombre_campo'): item.get('respuesta_campo', '') for item in respuestas if item.get('nombre_campo')}
 
@@ -298,8 +304,11 @@ class ClienteCreateSerializer(serializers.Serializer):
         producto = (validated_data.pop('producto', '') or '').strip()
         user = self.context['request'].user
 
+        servicio_id = validated_data.pop('servicio_id')
+        contratista_id = validated_data.pop('contratista_id')
         cliente = Cliente.objects.create(
             **validated_data,
+            contratista_id=contratista_id,
             producto=producto,
             usuario_registra=user
         )
@@ -334,14 +343,12 @@ class ClienteCreateSerializer(serializers.Serializer):
                     vendedor_id_val = int(str(item.get('respuesta_campo', '')).strip())
                 except (ValueError, TypeError):
                     pass
-        servicio = Servicio.objects.filter(id=cliente.servicio_id).first()
-        empresa_id = servicio.empresa_id if servicio else None
         ce = ClienteEmpresa.objects.create(
             cliente=cliente,
             tipo_cliente=tipo_cliente_val,
             vendedor_id=vendedor_id_val,
-            empresa_id=empresa_id,
-            servicio_id=cliente.servicio_id,
+            servicio_id=servicio_id,
+            contratista_id=contratista_id,
             producto=producto or '',
             formulario_id=None,
             usuario_registra=user,
@@ -360,6 +367,7 @@ class ClienteCreateSerializer(serializers.Serializer):
 class ClienteAgregarProductoSerializer(serializers.Serializer):
     """Serializer para agregar un nuevo producto a un cliente existente (sin duplicar datos del cliente)."""
     servicio_id = serializers.IntegerField()
+    contratista_id = serializers.IntegerField()
     producto = serializers.CharField(max_length=255, required=False, allow_blank=True)
     respuestas = serializers.ListField(
         child=serializers.DictField(child=serializers.CharField()),
@@ -369,19 +377,23 @@ class ClienteAgregarProductoSerializer(serializers.Serializer):
 
     def validate(self, attrs):
         servicio_id = attrs.get('servicio_id')
+        contratista_id = attrs.get('contratista_id')
         respuestas = attrs.get('respuestas', [])
         producto = (attrs.get('producto') or '').strip() or None
 
-        if not servicio_id:
+        if not servicio_id or not contratista_id:
             return attrs
 
         try:
-            servicio = Servicio.objects.get(id=servicio_id, estado='1')
+            Servicio.objects.get(id=servicio_id, estado='1')
         except Servicio.DoesNotExist:
             raise serializers.ValidationError({'servicio_id': 'Servicio no válido o inactivo.'})
+        try:
+            Contratista.objects.get(id=contratista_id, servicio_id=servicio_id, estado='1')
+        except Contratista.DoesNotExist:
+            raise serializers.ValidationError({'contratista_id': 'Contratista no válido o no pertenece al servicio.'})
 
-        empresa_id = servicio.empresa_id
-        campos = list(get_campos_formulario(empresa_id, servicio_id, producto))
+        campos = list(get_campos_formulario(servicio_id, contratista_id, producto))
         nombres_campos = {c.nombre for c in campos}
         respuestas_por_campo = {item.get('nombre_campo'): item.get('respuesta_campo', '') for item in respuestas if item.get('nombre_campo')}
 
@@ -460,8 +472,6 @@ class ClienteAgregarProductoSerializer(serializers.Serializer):
                 estado_nuevo_producto = (item.get('respuesta_campo') or '').strip() or estado_nuevo_producto
                 break
 
-        servicio = Servicio.objects.filter(id=servicio_id).first()
-        empresa_id = servicio.empresa_id if servicio else None
         NOMBRES_TIPO_CLIENTE = ['tipo_cliente', 'Tipo de cliente', 'Tipo Cliente', 'tipo cliente']
         tipo_cliente_val = ''
         vendedor_id_val = None
@@ -479,8 +489,8 @@ class ClienteAgregarProductoSerializer(serializers.Serializer):
             cliente=cliente,
             tipo_cliente=tipo_cliente_val,
             vendedor_id=vendedor_id_val,
-            empresa_id=empresa_id,
             servicio_id=servicio_id,
+            contratista_id=contratista_id,
             producto=producto or '',
             formulario_id=None,
             usuario_registra=user,
@@ -512,7 +522,7 @@ class ClienteActualizarProductoSerializer(serializers.Serializer):
     """Actualiza un producto (ClienteEmpresa) existente, incluido vendedor_id por producto."""
     cliente_empresa_id = serializers.IntegerField()
     tipo_cliente = serializers.CharField(required=False, allow_blank=True, default='')
-    servicio_id = serializers.IntegerField(required=False, allow_null=True)
+    contratista_id = serializers.IntegerField(required=False, allow_null=True)
     producto = serializers.CharField(required=False, allow_blank=True, default='')
     respuestas = serializers.ListField(
         child=serializers.DictField(child=serializers.CharField()),
@@ -520,13 +530,13 @@ class ClienteActualizarProductoSerializer(serializers.Serializer):
         default=list,
     )
 
-    def validate_servicio_id(self, value):
+    def validate_contratista_id(self, value):
         if value is None:
             return value
         try:
-            Servicio.objects.get(id=value, estado='1')
-        except Servicio.DoesNotExist:
-            raise serializers.ValidationError('Servicio no válido o inactivo.')
+            Contratista.objects.get(id=value, estado='1')
+        except Contratista.DoesNotExist:
+            raise serializers.ValidationError('Contratista no válido o inactivo.')
         return value
 
     def validate(self, attrs):
@@ -551,8 +561,8 @@ class ClienteActualizarProductoSerializer(serializers.Serializer):
         # Campos directos
         if 'tipo_cliente' in self.validated_data:
             ce.tipo_cliente = (self.validated_data.get('tipo_cliente') or '').strip()
-        if 'servicio_id' in self.validated_data and self.validated_data['servicio_id'] is not None:
-            ce.servicio_id = self.validated_data['servicio_id']
+        if 'contratista_id' in self.validated_data and self.validated_data['contratista_id'] is not None:
+            ce.contratista_id = self.validated_data['contratista_id']
         if 'producto' in self.validated_data:
             ce.producto = (self.validated_data.get('producto') or '').strip()
         # Vendedor del producto desde respuestas (guardar en ClienteEmpresa.vendedor_id)

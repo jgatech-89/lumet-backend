@@ -10,11 +10,11 @@ class CampoOpcionInline(admin.TabularInline):
 
 @admin.register(Campo)
 class CampoAdmin(admin.ModelAdmin):
-    list_display = ['nombre', 'tipo', 'empresa', 'servicio', 'orden', 'requerido', 'activo', 'estado']
-    list_filter = ['tipo', 'activo', 'estado', 'empresa', 'servicio']
+    list_display = ['nombre', 'tipo', 'servicio', 'contratista', 'orden', 'requerido', 'activo', 'estado']
+    list_filter = ['tipo', 'activo', 'estado', 'servicio', 'contratista']
     search_fields = ['nombre', 'placeholder']
-    ordering = ['empresa', 'servicio', 'orden']
-    raw_id_fields = ['empresa', 'servicio', 'usuario_registra', 'updated_by', 'usuario_elimina']
+    ordering = ['servicio', 'contratista', 'orden']
+    raw_id_fields = ['servicio', 'contratista', 'usuario_registra', 'updated_by', 'usuario_elimina']
     readonly_fields = ['fecha_registra', 'updated_at', 'fecha_elimina']
     inlines = [CampoOpcionInline]
 

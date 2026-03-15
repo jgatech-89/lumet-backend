@@ -12,7 +12,7 @@ urlpatterns = [
     path('auth/', include('apps.auth.urls')),
     path('api/', include('apps.core.urls')),
     path('api/', include('apps.persona.urls')),
-    path('api/', include('apps.empresa.urls')),
+    path('api/', include('apps.contratista.urls')),
     path('api/', include('apps.servicio.urls')),
     path('api/', include('apps.formularios.urls')),
     path('api/', include('apps.cliente.urls')),

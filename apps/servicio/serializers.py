@@ -1,10 +1,20 @@
 from rest_framework import serializers
-from apps.empresa.models import Empresa
 from .models import Servicio
 
 
-def _nombre_persona(persona):
+class ServicioMinimalSerializer(serializers.ModelSerializer):
+    """Solo id y nombre, para selectores (ej. modal añadir campo)."""
+    class Meta:
+        model = Servicio
+        fields = ['id', 'nombre']
 
+
+def _nombre_persona(persona):
+    """
+    Construye el nombre completo de la Persona concatenando:
+    primer_nombre, segundo_nombre, primer_apellido, segundo_apellido.
+    Si todo está vacío, devuelve username como fallback.
+    """
     if persona is None:
         return None
     partes = [
@@ -20,15 +30,10 @@ def _nombre_persona(persona):
 
 
 class ServicioSerializer(serializers.ModelSerializer):
-    empresa_nombre = serializers.SerializerMethodField()
-    empresa_id = serializers.PrimaryKeyRelatedField(
-        queryset=Empresa.objects.filter(estado='1'),
-        source='empresa',
-    )
+    estado = serializers.SerializerMethodField()
     usuario_registra_nombre = serializers.SerializerMethodField()
     usuario_edita_nombre = serializers.SerializerMethodField()
     usuario_elimina_nombre = serializers.SerializerMethodField()
-
     usuario_registra_id = serializers.PrimaryKeyRelatedField(
         source='usuario_registra', read_only=True, allow_null=True
     )
@@ -46,8 +51,6 @@ class ServicioSerializer(serializers.ModelSerializer):
             'nombre',
             'estado',
             'estado_servicio',
-            'empresa_id',
-            'empresa_nombre',
             'usuario_registra_id',
             'usuario_registra_nombre',
             'usuario_edita_id',
@@ -67,8 +70,8 @@ class ServicioSerializer(serializers.ModelSerializer):
             'fecha_elimina',
         ]
 
-    def get_empresa_nombre(self, obj):
-        return obj.empresa.nombre if obj.empresa else None
+    def get_estado(self, obj):
+        return 'Activa' if obj.estado_servicio == '1' else 'Inactiva'
 
     def get_usuario_registra_nombre(self, obj):
         return _nombre_persona(obj.usuario_registra)
@@ -79,24 +82,11 @@ class ServicioSerializer(serializers.ModelSerializer):
     def get_usuario_elimina_nombre(self, obj):
         return _nombre_persona(obj.usuario_elimina)
 
-    def validate(self, attrs):
-        """
-        No permitir mismo nombre en la misma empresa si ya existe un servicio ACTIVO (estado=1).
-        Si existe uno inactivo (estado=0, eliminado lógicamente), sí se permite crear uno nuevo.
-        """
-        nombre = attrs.get('nombre')
-        empresa = attrs.get('empresa')
-        if not nombre or not empresa:
-            return attrs
-        qs = Servicio.objects.filter(
-            nombre__iexact=nombre.strip(),
-            empresa=empresa,
-            estado='1',
-        )
+    def validate_nombre(self, value):
+        """Evita duplicados solo entre servicios no eliminados (estado=1)."""
+        queryset = Servicio.objects.filter(nombre__iexact=value, estado='1')
         if self.instance:
-            qs = qs.exclude(pk=self.instance.pk)
-        if qs.exists():
-            raise serializers.ValidationError({
-                'nombre': 'Ya existe un servicio activo con este nombre en la empresa.',
-            })
-        return attrs
+            queryset = queryset.exclude(pk=self.instance.pk)
+        if queryset.exists():
+            raise serializers.ValidationError("Ya existe un servicio con este nombre.")
+        return value

@@ -20,8 +20,8 @@ from apps.core.choices import ESTADO_VENTA
         summary='Listar campos',
         parameters=[
             OpenApiParameter(name='search', description='Buscar por nombre de campo', required=False, type=str),
-            OpenApiParameter(name='empresa', description='Filtrar por ID de empresa', required=False, type=int),
             OpenApiParameter(name='servicio', description='Filtrar por ID de servicio', required=False, type=int),
+            OpenApiParameter(name='contratista', description='Filtrar por ID de contratista', required=False, type=int),
             OpenApiParameter(name='activo', description='Filtrar por activo (true/false)', required=False, type=bool),
             OpenApiParameter(name='producto', description='Filtrar por producto (valor del campo)', required=False, type=str),
         ],
@@ -47,7 +47,7 @@ class CampoViewSet(viewsets.ModelViewSet):
         return (
             Campo.objects
             .filter(fecha_elimina__isnull=True)
-            .select_related('empresa', 'servicio', 'usuario_registra', 'updated_by', 'usuario_elimina')
+            .select_related('servicio', 'contratista', 'usuario_registra', 'updated_by', 'usuario_elimina')
             .prefetch_related('opciones')
             .order_by('seccion', 'orden', 'id')
         )
@@ -63,14 +63,14 @@ class CampoViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         data = serializer.validated_data
-        empresa_id = data.get('empresa')
-        empresa_id = empresa_id.pk if hasattr(empresa_id, 'pk') else empresa_id
         servicio_id = data.get('servicio')
         servicio_id = servicio_id.pk if hasattr(servicio_id, 'pk') else servicio_id
+        contratista_id = data.get('contratista')
+        contratista_id = contratista_id.pk if hasattr(contratista_id, 'pk') else contratista_id
         producto = (data.get('producto') or '').strip()
         seccion = data.get('seccion', 'campos_formulario')
         orden = data.get('orden', 0)
-        reordenar_campos_para_insertar(empresa_id, servicio_id, producto, seccion, orden, excluir_campo_id=None)
+        reordenar_campos_para_insertar(servicio_id, contratista_id, producto, seccion, orden, excluir_campo_id=None)
         serializer.save(usuario_registra=self.request.user)
 
     def update(self, request, *args, **kwargs):
@@ -87,12 +87,12 @@ class CampoViewSet(viewsets.ModelViewSet):
     def perform_update(self, serializer):
         instance = serializer.instance
         data = serializer.validated_data
-        empresa_id = instance.empresa_id
         servicio_id = instance.servicio_id
+        contratista_id = instance.contratista_id
         producto = (instance.producto or '').strip()
         seccion = data.get('seccion', instance.seccion)
         orden = data.get('orden', instance.orden)
-        reordenar_campos_para_insertar(empresa_id, servicio_id, producto, seccion, orden, excluir_campo_id=instance.pk)
+        reordenar_campos_para_insertar(servicio_id, contratista_id, producto, seccion, orden, excluir_campo_id=instance.pk)
         serializer.save(updated_by=self.request.user)
 
     def destroy(self, request, *args, **kwargs):
@@ -294,16 +294,16 @@ class CampoOpcionViewSet(viewsets.ModelViewSet):
     summary='Opciones de un campo por nombre (ej. Producto)',
     parameters=[
         OpenApiParameter(name='nombre', description='Nombre del campo (ej. producto, Producto)', required=True, type=str),
-        OpenApiParameter(name='empresa_id', description='ID de empresa para filtrar opciones por servicio (opcional)', required=False, type=int),
         OpenApiParameter(name='servicio_id', description='ID de servicio para filtrar opciones (opcional)', required=False, type=int),
+        OpenApiParameter(name='contratista_id', description='ID de contratista para filtrar opciones (opcional)', required=False, type=int),
     ],
     responses={200: {'type': 'array', 'items': {'type': 'object', 'properties': {'value': {'type': 'string'}, 'label': {'type': 'string'}}}}},
 )
 class OpcionesCampoPorNombreAPIView(APIView):
     """
-    GET /api/campos/opciones-por-nombre/?nombre=producto&empresa_id=1&servicio_id=2
+    GET /api/campos/opciones-por-nombre/?nombre=producto&servicio_id=1&contratista_id=2
     Devuelve las opciones (CampoOpcion) de un campo cuyo nombre coincida (case-insensitive).
-    Si se pasan empresa_id y servicio_id, prioriza el campo más específico (empresa+servicio > empresa > global).
+    Si se pasan servicio_id y contratista_id, prioriza el campo más específico (servicio+contratista > servicio > global).
     """
     permission_classes = [IsAuthenticated]
 
@@ -316,13 +316,13 @@ class OpcionesCampoPorNombreAPIView(APIView):
                 {'error': 'Se requiere el parámetro "nombre".'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        empresa_id = request.query_params.get('empresa_id')
         servicio_id = request.query_params.get('servicio_id')
+        contratista_id = request.query_params.get('contratista_id')
         try:
-            empresa_id = int(empresa_id) if empresa_id is not None else None
             servicio_id = int(servicio_id) if servicio_id is not None else None
+            contratista_id = int(contratista_id) if contratista_id is not None else None
         except (TypeError, ValueError):
-            empresa_id = servicio_id = None
+            servicio_id = contratista_id = None
 
         # Para "producto": buscar también Productos, Tipo producto, tipo de producto
         nombres_producto = ['producto', 'Productos', 'Tipo producto', 'tipo de producto']
@@ -342,12 +342,12 @@ class OpcionesCampoPorNombreAPIView(APIView):
                 tipo='select',
             ).prefetch_related('opciones')
 
-        if empresa_id is not None and servicio_id is not None:
+        if servicio_id is not None and contratista_id is not None:
             qs = qs.filter(
-                Q(empresa_id=empresa_id, servicio_id=servicio_id)
-                | Q(empresa_id=empresa_id, servicio_id__isnull=True)
-                | Q(empresa_id__isnull=True, servicio_id__isnull=True)
-            ).order_by('-empresa_id', '-servicio_id')
+                Q(servicio_id=servicio_id, contratista_id=contratista_id)
+                | Q(servicio_id=servicio_id, contratista_id__isnull=True)
+                | Q(servicio_id__isnull=True, contratista_id__isnull=True)
+            ).order_by('-servicio_id', '-contratista_id')
             campo = qs.first()
             if not campo:
                 return Response([])
@@ -355,10 +355,10 @@ class OpcionesCampoPorNombreAPIView(APIView):
                 campo.opciones.filter(activo=True).order_by('orden', 'id').values('value', 'label')
             )
             return Response([{'value': o['value'], 'label': o['label']} for o in opciones])
-        elif empresa_id is not None:
+        elif servicio_id is not None:
             qs = qs.filter(
-                Q(empresa_id=empresa_id) | Q(empresa_id__isnull=True)
-            ).order_by('-empresa_id')
+                Q(servicio_id=servicio_id) | Q(servicio_id__isnull=True)
+            ).order_by('-servicio_id')
             campo = qs.first()
             if not campo:
                 return Response([])
@@ -367,8 +367,7 @@ class OpcionesCampoPorNombreAPIView(APIView):
             )
             return Response([{'value': o['value'], 'label': o['label']} for o in opciones])
         else:
-            # Sin empresa_id/servicio_id: devolver TODAS las opciones de producto de todos los campos
-            # (para "aplicar a todos los servicios y contratistas" - listado según como se creó)
+            # Sin servicio_id/contratista_id: devolver TODAS las opciones de producto de todos los campos
             from apps.formularios.models import CampoOpcion
             opciones_qs = CampoOpcion.objects.filter(
                 campo__in=qs,
@@ -418,10 +417,10 @@ class OpcionesEstadoVentaAPIView(APIView):
 
 @extend_schema(
     tags=['Formularios'],
-    summary='Campos del formulario por empresa, servicio y producto',
+    summary='Campos del formulario por servicio, contratista y producto',
     parameters=[
-        OpenApiParameter(name='empresa_id', description='ID de la empresa (opcional si se piden campos globales)', required=False, type=int),
         OpenApiParameter(name='servicio_id', description='ID del servicio (opcional si se piden campos globales)', required=False, type=int),
+        OpenApiParameter(name='contratista_id', description='ID del contratista (opcional si se piden campos globales)', required=False, type=int),
         OpenApiParameter(name='producto', description='Valor del producto para filtrar campos (opcional)', required=False, type=str),
         OpenApiParameter(name='solo_sin_producto', description='Si true, solo devuelve campos sin restricción por producto', required=False, type=bool),
     ],
@@ -429,34 +428,34 @@ class OpcionesEstadoVentaAPIView(APIView):
 )
 class FormularioCamposAPIView(APIView):
     """
-    GET /api/formulario/?empresa_id=1&servicio_id=2&producto=luz
+    GET /api/formulario/?servicio_id=1&contratista_id=2&producto=luz
     Devuelve los campos configurados para el formulario (activos, ordenados, con opciones para select).
-    Si no se pasan empresa_id ni servicio_id, devuelve campos globales.
+    Si no se pasan servicio_id ni contratista_id, devuelve campos globales.
     Si se pasa producto, filtra campos que aplican a ese producto (o producto vacío = todos).
     """
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        empresa_id = request.query_params.get('empresa_id')
         servicio_id = request.query_params.get('servicio_id')
+        contratista_id = request.query_params.get('contratista_id')
         producto = (request.query_params.get('producto') or '').strip() or None
         solo_sin_producto = request.query_params.get('solo_sin_producto', '').lower() in ('true', '1', 'yes')
-        if not empresa_id and not servicio_id:
+        if not servicio_id and not contratista_id:
             campos = get_campos_formulario(None, None, producto, solo_sin_producto)
         else:
-            if not empresa_id or not servicio_id:
+            if not servicio_id or not contratista_id:
                 return Response(
-                    {'error': 'Se requieren ambos parámetros empresa_id y servicio_id, o ninguno para campos globales.'},
+                    {'error': 'Se requieren ambos parámetros servicio_id y contratista_id, o ninguno para campos globales.'},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
             try:
-                empresa_id = int(empresa_id)
                 servicio_id = int(servicio_id)
+                contratista_id = int(contratista_id)
             except (TypeError, ValueError):
                 return Response(
-                    {'error': 'empresa_id y servicio_id deben ser números.'},
+                    {'error': 'servicio_id y contratista_id deben ser números.'},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-            campos = get_campos_formulario(empresa_id, servicio_id, producto, solo_sin_producto)
+            campos = get_campos_formulario(servicio_id, contratista_id, producto, solo_sin_producto)
         serializer = FormularioCampoSerializer(campos, many=True)
         return Response(serializer.data)

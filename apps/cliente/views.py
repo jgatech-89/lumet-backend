@@ -54,25 +54,24 @@ def _vendedor_nombre_cliente(cliente):
         return r.respuesta_campo
 
 
-def _empresa_servicio_producto_para_cliente(cliente):
+def _servicio_contratista_producto_para_cliente(cliente):
     """
-    Devuelve empresa_nombre, servicio_nombre, producto para un cliente (primera relación
-    ClienteEmpresa o fallback desde cliente.servicio_id / cliente.producto). Útil para Excel.
+    Devuelve servicio_nombre, contratista_nombre, producto para un cliente (primera relación
+    ClienteEmpresa o fallback desde cliente.contratista_id / cliente.producto). Útil para Excel.
     """
-    from apps.servicio.models import Servicio
-    # Prefetch ya trae cliente_empresas con estado='1' y select_related
+    from apps.servicio.models import Contratista
     ce = next(iter(cliente.cliente_empresas.all()), None)
     if ce:
         return (
-            (ce.empresa.nombre if ce.empresa else ''),
             (ce.servicio.nombre if ce.servicio else ''),
+            (ce.contratista.nombre if ce.contratista else ''),
             ce.producto or '',
         )
-    servicio = Servicio.objects.filter(id=cliente.servicio_id).select_related('empresa').first() if cliente.servicio_id else None
-    empresa_nombre = servicio.empresa.nombre if servicio and servicio.empresa_id else ''
-    servicio_nombre = servicio.nombre if servicio else ''
+    contratista = Contratista.objects.filter(id=cliente.contratista_id).select_related('servicio').first() if cliente.contratista_id else None
+    servicio_nombre = contratista.servicio.nombre if contratista and contratista.servicio_id else ''
+    contratista_nombre = contratista.nombre if contratista else ''
     producto = (cliente.producto or '').strip()
-    return (empresa_nombre, servicio_nombre, producto)
+    return (servicio_nombre, contratista_nombre, producto)
 
 
 def _formatear_estado_venta_legible(valor):
@@ -98,27 +97,25 @@ def _productos_para_pdf(cliente):
     """
     Devuelve una lista de diccionarios con la información de cada producto del cliente
     para generar una página del PDF por cada uno. Si no hay ClienteEmpresa, se arma
-    un producto a partir de cliente.servicio_id y cliente.producto.
+    un producto a partir de cliente.contratista_id y cliente.producto.
     """
-    from apps.servicio.models import Servicio
-    # Usar prefetch (get_queryset ya incluye ClienteEmpresa con estado='1' y select_related)
-    empresas = list(cliente.cliente_empresas.all())
-    if empresas:
+    from apps.servicio.models import Contratista
+    productos_ce = list(cliente.cliente_empresas.all())
+    if productos_ce:
         return [
             {
-                'empresa_nombre': (ce.empresa.nombre if ce.empresa else '-'),
                 'servicio_nombre': (ce.servicio.nombre if ce.servicio else '-'),
+                'contratista_nombre': (ce.contratista.nombre if ce.contratista else '-'),
                 'producto': ce.producto or '-',
                 'tipo_cliente': ce.tipo_cliente or '-',
             }
-            for ce in empresas
+            for ce in productos_ce
         ]
-    # Cliente sin ClienteEmpresa (registro antiguo): un solo “producto” con servicio/producto del cliente
-    servicio = Servicio.objects.filter(id=cliente.servicio_id).select_related('empresa').first() if cliente.servicio_id else None
-    empresa_nombre = servicio.empresa.nombre if servicio and servicio.empresa_id else '-'
-    servicio_nombre = servicio.nombre if servicio else '-'
+    contratista = Contratista.objects.filter(id=cliente.contratista_id).select_related('servicio').first() if cliente.contratista_id else None
+    servicio_nombre = contratista.servicio.nombre if contratista and contratista.servicio_id else '-'
+    contratista_nombre = contratista.nombre if contratista else '-'
     producto = (cliente.producto or '').strip() or '-'
-    return [{'empresa_nombre': empresa_nombre, 'servicio_nombre': servicio_nombre, 'producto': producto, 'tipo_cliente': '-'}]
+    return [{'servicio_nombre': servicio_nombre, 'contratista_nombre': contratista_nombre, 'producto': producto, 'tipo_cliente': '-'}]
 
 
 def _estado_venta_por_producto(cliente, cliente_empresa):
@@ -170,28 +167,28 @@ def _productos_para_excel(cliente):
     Lista de dicts por producto del cliente para Excel. Estado y vendedor son POR PRODUCTO:
     del HistorialEstadoVenta de ese producto (cliente_empresa), no del último ni del cliente.
     """
-    from apps.servicio.models import Servicio
-    empresas = list(cliente.cliente_empresas.all())
-    if empresas:
+    from apps.servicio.models import Contratista
+    productos_ce = list(cliente.cliente_empresas.all())
+    if productos_ce:
         return [
             {
-                'empresa_nombre': (ce.empresa.nombre if ce.empresa else ''),
                 'servicio_nombre': (ce.servicio.nombre if ce.servicio else ''),
+                'contratista_nombre': (ce.contratista.nombre if ce.contratista else ''),
                 'producto': ce.producto or '',
                 'estado_venta': _estado_venta_por_producto(cliente, ce),
                 'vendedor': _vendedor_por_producto(cliente, ce),
             }
-            for ce in empresas
+            for ce in productos_ce
         ]
-    servicio = Servicio.objects.filter(id=cliente.servicio_id).select_related('empresa').first() if cliente.servicio_id else None
-    empresa_nombre = servicio.empresa.nombre if servicio and servicio.empresa_id else ''
-    servicio_nombre = servicio.nombre if servicio else ''
+    contratista = Contratista.objects.filter(id=cliente.contratista_id).select_related('servicio').first() if cliente.contratista_id else None
+    servicio_nombre = contratista.servicio.nombre if contratista and contratista.servicio_id else ''
+    contratista_nombre = contratista.nombre if contratista else ''
     producto = (cliente.producto or '').strip()
     estado_venta = _estado_venta_cliente(cliente)
     vendedor = _vendedor_nombre_cliente(cliente) or ''
     return [{
-        'empresa_nombre': empresa_nombre,
         'servicio_nombre': servicio_nombre,
+        'contratista_nombre': contratista_nombre,
         'producto': producto,
         'estado_venta': estado_venta,
         'vendedor': vendedor,
@@ -297,7 +294,7 @@ class ClienteViewSet(viewsets.ModelViewSet):
             Prefetch(
                 'cliente_empresas',
                 queryset=ClienteEmpresa.objects.filter(estado='1')
-                .select_related('empresa', 'servicio', 'usuario_registra', 'vendedor')
+                .select_related('servicio', 'contratista', 'usuario_registra', 'vendedor')
                 .prefetch_related(
                     Prefetch(
                         'historial_estados_venta',
@@ -535,11 +532,11 @@ class ClienteViewSet(viewsets.ModelViewSet):
             ]))
             elements.append(t_cli)
 
-            # 2. EMPRESA Y PRODUCTO (relación cliente_empresas)
-            elements.append(Paragraph('2. EMPRESA Y PRODUCTO ASOCIADO', section_style))
+            # 2. SERVICIO Y PRODUCTO (relación cliente_empresas)
+            elements.append(Paragraph('2. SERVICIO Y PRODUCTO ASOCIADO', section_style))
             datos_empresa = [
-                ['SERVICIO', prod['empresa_nombre']],
-                ['CONTRATISTA', prod['servicio_nombre']],
+                ['SERVICIO', prod['servicio_nombre']],
+                ['CONTRATISTA', prod['contratista_nombre']],
                 ['PRODUCTO', prod['producto']],
                 ['TIPO DE CLIENTE', prod['tipo_cliente']],
             ]
@@ -646,8 +643,8 @@ class ClienteViewSet(viewsets.ModelViewSet):
                         _mayus(c.numero_identificacion),
                         _mayus(c.telefono),
                         _mayus(c.correo),
-                        _mayus(prod['empresa_nombre']),
                         _mayus(prod['servicio_nombre']),
+                        _mayus(prod['contratista_nombre']),
                         _mayus(prod['producto']),
                         _mayus(estado_venta),
                         _mayus(vendedor),
@@ -655,8 +652,8 @@ class ClienteViewSet(viewsets.ModelViewSet):
                 else:
                     ws.append([
                         '', '', '', '', '',
-                        _mayus(prod['empresa_nombre']),
                         _mayus(prod['servicio_nombre']),
+                        _mayus(prod['contratista_nombre']),
                         _mayus(prod['producto']),
                         _mayus(estado_venta),
                         _mayus(vendedor),

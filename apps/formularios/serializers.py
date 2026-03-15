@@ -1,6 +1,6 @@
 from rest_framework import serializers
-from apps.empresa.models import Empresa
 from apps.servicio.models import Servicio
+from apps.contratista.models import Contratista
 from .models import Campo, CampoOpcion
 
 
@@ -20,23 +20,19 @@ class CampoOpcionNestedSerializer(serializers.ModelSerializer):
 
 class CampoReadSerializer(serializers.ModelSerializer):
     """Serializer de lectura para Campo (incluye opciones y nombres de FKs)."""
-    empresa_nombre = serializers.SerializerMethodField()
     servicio_nombre = serializers.SerializerMethodField()
-
-    def get_empresa_nombre(self, obj):
-        # En UI se muestra en la columna "Servicio"
-        # Si no hay empresa asociada (aplica a todos), mostramos "Todos los servicios".
-        return obj.empresa.nombre if obj.empresa else 'Todos los servicios'
+    contratista_nombre = serializers.SerializerMethodField()
     opciones = CampoOpcionNestedSerializer(many=True, read_only=True)
 
     def get_servicio_nombre(self, obj):
+        # En UI se muestra en la columna "Servicio"
+        return obj.servicio.nombre if obj.servicio else 'Todos los servicios'
+
+    def get_contratista_nombre(self, obj):
         # En UI se muestra en la columna "Contratista"
-        # - Si hay servicio concreto: su nombre.
-        # - Si hay empresa pero no servicio: todos los contratistas de ese servicio.
-        # - Si tampoco hay empresa (aplica global): todos los servicios y contratistas.
+        if obj.contratista:
+            return obj.contratista.nombre
         if obj.servicio:
-            return obj.servicio.nombre
-        if obj.empresa:
             return 'Todos los contratistas'
         return 'Todos los servicios y contratistas'
 
@@ -46,10 +42,10 @@ class CampoReadSerializer(serializers.ModelSerializer):
             'id',
             'nombre',
             'tipo',
-            'empresa',
-            'empresa_nombre',
             'servicio',
             'servicio_nombre',
+            'contratista',
+            'contratista_nombre',
             'producto',
             'placeholder',
             'seccion',
@@ -72,20 +68,20 @@ class CampoReadSerializer(serializers.ModelSerializer):
 
 class CampoWriteSerializer(serializers.ModelSerializer):
     """Serializer de escritura para Campo (sin opciones anidadas).
-    Si aplicar_todos_empresas=True: empresa_id y servicio_id quedan null (aplica a todo).
-    Si aplicar_todos_servicios=True (y empresa definida): servicio_id queda null (aplica a todos los servicios de la empresa).
+    Si aplicar_todos_servicios=True: servicio_id y contratista_id quedan null (aplica a todo).
+    Si aplicar_todos_contratistas=True (y servicio definido): contratista_id queda null (aplica a todos los contratistas del servicio).
     """
-    empresa_id = serializers.PrimaryKeyRelatedField(
-        queryset=Empresa.objects.filter(estado='1'),
-        source='empresa',
-        required=False,
-        allow_null=True
-    )
-    aplicar_todos_empresas = serializers.BooleanField(write_only=True, required=False, default=False)
-    aplicar_todos_servicios = serializers.BooleanField(write_only=True, required=False, default=False)
     servicio_id = serializers.PrimaryKeyRelatedField(
         queryset=Servicio.objects.filter(estado='1'),
         source='servicio',
+        required=False,
+        allow_null=True
+    )
+    aplicar_todos_servicios = serializers.BooleanField(write_only=True, required=False, default=False)
+    aplicar_todos_contratistas = serializers.BooleanField(write_only=True, required=False, default=False)
+    contratista_id = serializers.PrimaryKeyRelatedField(
+        queryset=Contratista.objects.filter(estado='1'),
+        source='contratista',
         required=False,
         allow_null=True
     )
@@ -96,10 +92,10 @@ class CampoWriteSerializer(serializers.ModelSerializer):
             'id',
             'nombre',
             'tipo',
-            'empresa_id',
-            'aplicar_todos_empresas',
-            'aplicar_todos_servicios',
             'servicio_id',
+            'aplicar_todos_servicios',
+            'aplicar_todos_contratistas',
+            'contratista_id',
             'producto',
             'placeholder',
             'seccion',
@@ -112,27 +108,27 @@ class CampoWriteSerializer(serializers.ModelSerializer):
         read_only_fields = ['id']
 
     def validate(self, attrs):
-        aplicar_empresas = attrs.pop('aplicar_todos_empresas', False)
         aplicar_servicios = attrs.pop('aplicar_todos_servicios', False)
-        if aplicar_empresas:
-            attrs['empresa'] = None
+        aplicar_contratistas = attrs.pop('aplicar_todos_contratistas', False)
+        if aplicar_servicios:
             attrs['servicio'] = None
+            attrs['contratista'] = None
         else:
-            if not attrs.get('empresa'):
-                raise serializers.ValidationError({
-                    'empresa_id': 'Seleccione una empresa o marque "Aplicar a todas las empresas".'
-                })
-            if aplicar_servicios:
-                attrs['servicio'] = None
-            elif not attrs.get('servicio'):
+            if not attrs.get('servicio'):
                 raise serializers.ValidationError({
                     'servicio_id': 'Seleccione un servicio o marque "Aplicar a todos los servicios".'
+                })
+            if aplicar_contratistas:
+                attrs['contratista'] = None
+            elif not attrs.get('contratista'):
+                raise serializers.ValidationError({
+                    'contratista_id': 'Seleccione un contratista o marque "Aplicar a todos los contratistas".'
                 })
         return attrs
 
 
 class FormularioCampoSerializer(serializers.ModelSerializer):
-    """Respuesta ligera para GET /api/formulario/?empresa_id=&servicio_id="""
+    """Respuesta ligera para GET /api/formulario/?servicio_id=&contratista_id="""
     opciones = serializers.SerializerMethodField()
 
     class Meta:

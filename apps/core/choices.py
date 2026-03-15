@@ -30,12 +30,12 @@ ESTADO_VENDEDOR = [
     ('0', 'Inactivo'),
 ]
 
-ESTADO_EMPRESA = [
+ESTADO_SERVICIO = [
     ('1', 'Activo'),
     ('0', 'Inactivo'),
 ]
 
-ESTADO_SERVICIO = [
+ESTADO_CONTRATISTA = [
     ('1', 'Activo'),
     ('0', 'Inactivo'),
 ]

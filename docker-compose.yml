@@ -11,6 +11,8 @@ services:
     volumes:
       - lumet_postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
+    ports:
+      - "5432:5432"
 
   lumet_backend:
     build:

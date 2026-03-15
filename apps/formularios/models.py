@@ -1,31 +1,31 @@
 from django.db import models
 from django.utils import timezone
 
-from apps.empresa.models import Empresa
 from apps.servicio.models import Servicio
+from apps.contratista.models import Contratista
 from apps.persona.models import Persona
 from apps.core.choices import ESTADO, TIPO_CAMPO, SECCIONES_FORMULARIO
 
 
 class Campo(models.Model):
-    """Campo dinámico configurable para formularios por empresa y servicio."""
+    """Campo dinámico configurable para formularios por servicio y contratista."""
     nombre = models.CharField(max_length=255)
     tipo = models.CharField(max_length=20, choices=TIPO_CAMPO)
-    empresa = models.ForeignKey(
-        Empresa,
-        on_delete=models.PROTECT,
-        related_name='campos_formulario',
-        null=True,
-        blank=True,
-        help_text='Si es null, aplica a todas las empresas.'
-    )
     servicio = models.ForeignKey(
         Servicio,
         on_delete=models.PROTECT,
         related_name='campos_formulario',
         null=True,
         blank=True,
-        help_text='Si es null, aplica a todos los servicios de la empresa.'
+        help_text='Si es null, aplica a todos los servicios.'
+    )
+    contratista = models.ForeignKey(
+        Contratista,
+        on_delete=models.PROTECT,
+        related_name='campos_formulario',
+        null=True,
+        blank=True,
+        help_text='Si es null, aplica a todos los contratistas del servicio.'
     )
     producto = models.CharField(
         max_length=255,

@@ -5,8 +5,8 @@ from django.db import models
 from django.utils import timezone
 
 from apps.persona.models import Persona
-from apps.empresa.models import Empresa
 from apps.servicio.models import Servicio
+from apps.contratista.models import Contratista
 from apps.core.choices import ESTADO, TIPO_IDENTIFICACION
 
 
@@ -19,7 +19,7 @@ class Cliente(models.Model):
     correo = models.EmailField(max_length=254, blank=True)
     direccion = models.CharField(max_length=500, blank=True, default='')
     estado = models.CharField(max_length=20, choices=ESTADO, default='1')
-    servicio_id = models.PositiveIntegerField(null=True, blank=True, help_text='ID del servicio seleccionado al crear el cliente')
+    contratista_id = models.PositiveIntegerField(null=True, blank=True, help_text='ID del contratista seleccionado al crear el cliente')
     producto = models.CharField(max_length=255, blank=True, default='', help_text='Producto seleccionado al completar el cliente')
     usuario_registra = models.ForeignKey(
         Persona,
@@ -130,8 +130,8 @@ class FormularioCliente(models.Model):
 
 class ClienteEmpresa(models.Model):
     """
-    Relación cliente + tipo_cliente + empresa + servicio + producto + vendedor.
-    Centraliza la relación entre cliente, tipo, empresa, producto/servicio y formulario.
+    Relación cliente + tipo_cliente + servicio + contratista + producto + vendedor.
+    Centraliza la relación entre cliente, tipo, servicio, contratista, producto y formulario.
     El vendedor se asocia al producto vendido (ClienteEmpresa).
     Se crea al registrar un cliente nuevo y al agregar productos a clientes existentes.
     """
@@ -149,15 +149,15 @@ class ClienteEmpresa(models.Model):
         related_name='cliente_empresas',
         verbose_name='Vendedor del producto',
     )
-    empresa = models.ForeignKey(
-        Empresa,
+    servicio = models.ForeignKey(
+        Servicio,
         on_delete=models.PROTECT,
         related_name='cliente_empresas',
         null=True,
         blank=True,
     )
-    servicio = models.ForeignKey(
-        Servicio,
+    contratista = models.ForeignKey(
+        Contratista,
         on_delete=models.PROTECT,
         related_name='cliente_empresas',
         null=True,
@@ -181,5 +181,5 @@ class ClienteEmpresa(models.Model):
         ordering = ['-fecha_registra']
 
     def __str__(self):
-        emp = self.empresa.nombre if self.empresa_id else '-'
-        return f'{self.cliente.nombre} - {emp} - {self.producto or "-"}'
+        srv = self.servicio.nombre if self.servicio_id else '-'
+        return f'{self.cliente.nombre} - {srv} - {self.producto or "-"}'

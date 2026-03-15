@@ -44,7 +44,7 @@ class ClienteEmpresaVendedorInline(admin.TabularInline):
     model = ClienteEmpresa
     fk_name = 'vendedor'
     extra = 0
-    readonly_fields = ['cliente', 'tipo_cliente', 'empresa', 'servicio', 'producto', 'estado', 'fecha_registra']
+    readonly_fields = ['cliente', 'tipo_cliente', 'servicio', 'contratista', 'producto', 'estado', 'fecha_registra']
     can_delete = False
     max_num = 0
     show_change_link = True

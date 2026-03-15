@@ -35,7 +35,7 @@ INSTALLED_APPS = [
     'apps.core',
     'apps.persona',
     'apps.auth',
-    'apps.empresa',
+    'apps.contratista',
     'apps.servicio',
     'apps.formularios',
     'apps.cliente',
