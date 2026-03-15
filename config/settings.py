@@ -39,6 +39,7 @@ INSTALLED_APPS = [
     'apps.servicio',
     'apps.formularios',
     'apps.cliente',
+    'apps.producto',
 ]
 
 MIDDLEWARE = [

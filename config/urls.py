@@ -14,6 +14,7 @@ urlpatterns = [
     path('api/', include('apps.persona.urls')),
     path('api/', include('apps.contratista.urls')),
     path('api/', include('apps.servicio.urls')),
+    path('api/', include('apps.producto.urls')),
     path('api/', include('apps.formularios.urls')),
     path('api/', include('apps.cliente.urls')),
     # Documentación OpenAPI (drf-spectacular)

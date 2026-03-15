@@ -71,3 +71,8 @@ TIPO_CLIENTE = [
     ('1', 'Particular'),
     ('2', 'Empresa'),
 ]
+
+ESTADO_PRODUCTO = [
+    ('1', 'Activo'),
+    ('0', 'Inactivo'),
+]
