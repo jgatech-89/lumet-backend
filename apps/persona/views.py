@@ -49,7 +49,9 @@ class VendedorViewSet(viewsets.ModelViewSet):
     search_fields = ['nombre_completo', 'numero_identificacion']
 
     def get_queryset(self):
-        qs = Vendedor.objects.filter(fecha_elimina__isnull=True)
+        qs = Vendedor.objects.filter(fecha_elimina__isnull=True).select_related(
+            'usuario_registra', 'updated_by', 'usuario_elimina'
+        )
         estado = self.request.query_params.get('estado')
         if estado in ('1', '0'):
             qs = qs.filter(estado_vendedor=estado)
