@@ -41,7 +41,12 @@ class Campo(models.Model):
         help_text='Sección del formulario a la que pertenece el campo.',
     )
     orden = models.PositiveIntegerField(default=0)
-    visible_si = models.CharField(max_length=500, blank=True, default='', help_text='Condición opcional para mostrar el campo según el valor de otro (uso futuro).')
+    visible_si = models.JSONField(
+        null=True,
+        blank=True,
+        default=None,
+        help_text='Condición opcional para mostrar el campo según el valor de otro (objeto JSON o null). En BD es jsonb.',
+    )
     requerido = models.BooleanField(default=False)
     activo = models.BooleanField(default=True)
     estado = models.CharField(max_length=20, choices=ESTADO, default='1')

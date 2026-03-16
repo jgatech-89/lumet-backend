@@ -1,3 +1,4 @@
+import json
 from rest_framework import serializers
 from apps.empresa.models import Empresa
 from apps.servicio.models import Servicio
@@ -112,6 +113,16 @@ class CampoWriteSerializer(serializers.ModelSerializer):
         read_only_fields = ['id']
 
     def validate(self, attrs):
+        # visible_si en BD es jsonb: '' no es válido; normalizar a None
+        if 'visible_si' in attrs:
+            v = attrs['visible_si']
+            if v == '' or (isinstance(v, str) and v.strip() == ''):
+                attrs['visible_si'] = None
+            elif isinstance(v, str):
+                try:
+                    attrs['visible_si'] = json.loads(v) if v.strip() else None
+                except (ValueError, TypeError):
+                    attrs['visible_si'] = None
         aplicar_empresas = attrs.pop('aplicar_todos_empresas', False)
         aplicar_servicios = attrs.pop('aplicar_todos_servicios', False)
         if aplicar_empresas:

@@ -237,7 +237,7 @@ class ClienteCreateSerializer(serializers.Serializer):
 
         NOMBRES_TIPO_CLIENTE = ['tipo_cliente', 'Tipo de cliente', 'Tipo Cliente', 'tipo cliente']
         NOMBRES_ESTADO_VENTA = ['estado_venta', 'Estado de venta', 'Estado venta', 'estado venta']
-        NOMBRES_PRODUCTO_CAMPO = ['producto', 'Producto']
+        NOMBRES_PRODUCTO_CAMPO = ['producto', 'Producto', 'Productos', 'Tipo producto', 'tipo de producto', 'Tipo de Producto']
         NOMBRES_CAMBIO_TITULAR = ['cambio de titular', 'Cambio de titular', 'cambio titular', 'Cambio titular']
         NOMBRES_EXTRA_PERMITIDOS = ['vendedor', 'Vendedor']
         norm = lambda s: (s or '').lower().replace(' ', '_')
@@ -387,7 +387,7 @@ class ClienteAgregarProductoSerializer(serializers.Serializer):
 
         NOMBRES_TIPO_CLIENTE = ['tipo_cliente', 'Tipo de cliente', 'Tipo Cliente', 'tipo cliente']
         NOMBRES_ESTADO_VENTA = ['estado_venta', 'Estado de venta', 'Estado venta', 'estado venta']
-        NOMBRES_PRODUCTO_CAMPO = ['producto', 'Producto']
+        NOMBRES_PRODUCTO_CAMPO = ['producto', 'Producto', 'Productos', 'Tipo producto', 'tipo de producto', 'Tipo de Producto']
         NOMBRES_CAMBIO_TITULAR = ['cambio de titular', 'Cambio de titular', 'cambio titular', 'Cambio titular']
         NOMBRES_EXTRA_PERMITIDOS = ['vendedor', 'Vendedor']
         norm = lambda s: (s or '').lower().replace(' ', '_')
