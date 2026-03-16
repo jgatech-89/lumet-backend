@@ -326,10 +326,20 @@ class OpcionesCampoPorNombreAPIView(APIView):
 
         # Para "producto": buscar también Productos, Tipo producto, tipo de producto
         nombres_producto = ['producto', 'Productos', 'Tipo producto', 'tipo de producto']
+        # Para "tipo_cliente": buscar también Tipo de cliente, Tipo Cliente, tipo cliente
+        nombres_tipo_cliente = ['tipo_cliente', 'Tipo de cliente', 'Tipo Cliente', 'tipo cliente']
         nombre_lower = nombre.lower().strip()
         if nombre_lower in ('producto', 'productos', 'tipo producto', 'tipo de producto'):
             q_nombres = Q()
             for n in nombres_producto:
+                q_nombres |= Q(nombre__iexact=n)
+            qs = Campo.objects.filter(
+                fecha_elimina__isnull=True,
+                tipo='select',
+            ).filter(q_nombres).prefetch_related('opciones')
+        elif nombre_lower in ('tipo_cliente', 'tipo de cliente', 'tipo cliente'):
+            q_nombres = Q()
+            for n in nombres_tipo_cliente:
                 q_nombres |= Q(nombre__iexact=n)
             qs = Campo.objects.filter(
                 fecha_elimina__isnull=True,

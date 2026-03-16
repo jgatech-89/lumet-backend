@@ -1,7 +1,7 @@
 import io
 from django.http import HttpResponse
 from django.db.models import Prefetch
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, Fill, PatternFill, Alignment, Border, Side
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
@@ -284,7 +284,7 @@ class ClienteViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, SearchFilter]
     filterset_class = ClienteFilter
-    search_fields = ['nombre', 'numero_identificacion', 'correo', 'telefono']
+    search_fields = ['nombre', 'numero_identificacion', 'correo_electronico_o_carta', 'telefono']
 
     def get_queryset(self):
         qs = Cliente.objects.filter(estado='1').order_by('-fecha_registro')
@@ -520,7 +520,7 @@ class ClienteViewSet(viewsets.ModelViewSet):
                 ['TIPO DE IDENTIFICACIÓN', cliente.tipo_identificacion or '-'],
                 ['NÚMERO DE IDENTIFICACIÓN', cliente.numero_identificacion or '-'],
                 ['TELÉFONO', cliente.telefono or '-'],
-                ['CORREO ELECTRÓNICO', cliente.correo or '-'],
+                ['CORREO O CARTA', cliente.correo_electronico_o_carta or '-'],
                 ['ESTADO DE VENTA', estado_venta],
             ]
             t_cli = Table(datos_cliente, colWidths=[5 * cm, 10.5 * cm])
@@ -623,7 +623,7 @@ class ClienteViewSet(viewsets.ModelViewSet):
 
         # SERVICIO = antes "Tipo de empresa"; CONTRATISTA = antes "Tipo de servicio"; orden: SERVICIO | CONTRATISTA | TIPO PRODUCTO
         headers = [
-            'NOMBRE', 'TIPO IDENTIFICACIÓN', 'NÚMERO IDENTIFICACIÓN', 'TELÉFONO', 'CORREO',
+            'NOMBRE', 'TIPO IDENTIFICACIÓN', 'NÚMERO IDENTIFICACIÓN', 'TELÉFONO', 'CORREO ELECTRÓNICO O CARTA',
             'SERVICIO', 'CONTRATISTA', 'TIPO PRODUCTO',
             'ESTADO VENTA', 'VENDEDOR',
         ]
@@ -645,7 +645,7 @@ class ClienteViewSet(viewsets.ModelViewSet):
                         _mayus(c.tipo_identificacion),
                         _mayus(c.numero_identificacion),
                         _mayus(c.telefono),
-                        _mayus(c.correo),
+                        _mayus(c.correo_electronico_o_carta),
                         _mayus(prod['empresa_nombre']),
                         _mayus(prod['servicio_nombre']),
                         _mayus(prod['producto']),
@@ -706,3 +706,163 @@ class ClienteViewSet(viewsets.ModelViewSet):
         )
         response['Content-Disposition'] = 'attachment; filename="clientes.xlsx"'
         return response
+
+    @action(detail=False, methods=['get'], url_path='descargar-plantilla')
+    def descargar_plantilla(self, request):
+        """
+        Descarga plantilla Excel para importación masiva de clientes.
+        Columnas: Nombre completo, Tipo identificación, Nº identificación, CUPS, Dirección,
+        Teléfono, Correo, Compañía anterior, Compañía actual, Producto, Correo electrónico o carta.
+        """
+        wb = Workbook()
+        ws = wb.active
+        ws.title = 'Clientes'
+
+        headers = [
+            'Nombre completo',
+            'Tipo identificación',
+            'Número identificación',
+            'CUPS',
+            'Cuenta bancaria',
+            'Dirección',
+            'Teléfono',
+            'Correo electrónico o carta',
+            'Compañía anterior',
+            'Compañía actual',
+            'Producto',
+        ]
+        ws.append(headers)
+
+        # Estilo encabezado
+        header_fill = PatternFill(start_color='1e3a5f', end_color='1e3a5f', fill_type='solid')
+        header_font = Font(bold=True, color='FFFFFF', size=11)
+        thin_border = Border(
+            left=Side(style='thin'),
+            right=Side(style='thin'),
+            top=Side(style='thin'),
+            bottom=Side(style='thin'),
+        )
+        for col, _ in enumerate(headers, start=1):
+            cell = ws.cell(row=1, column=col)
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+            cell.border = thin_border
+
+        # Fila de ejemplo
+        ws.append([
+            'Ejemplo: Juan Pérez',
+            'CC',
+            '123456789',
+            'ES0021000000000001AA',
+            'ES12 3456 7890 1234 5678',
+            'Calle Ejemplo 123',
+            '600123456',
+            'ejemplo@correo.com',
+            'Empresa anterior S.L.',
+            'Empresa actual S.A.',
+            'Producto A',
+        ])
+
+        column_widths = [22, 18, 20, 24, 24, 28, 14, 28, 22, 22, 18]
+        for col, width in enumerate(column_widths, start=1):
+            ws.column_dimensions[ws.cell(row=1, column=col).column_letter].width = width
+
+        for row in ws.iter_rows(min_row=2, max_row=ws.max_row, min_col=1, max_col=len(headers)):
+            for cell in row:
+                cell.border = thin_border
+
+        buffer = io.BytesIO()
+        wb.save(buffer)
+        buffer.seek(0)
+        response = HttpResponse(
+            buffer.getvalue(),
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+        response['Content-Disposition'] = 'attachment; filename="plantilla_importar_clientes.xlsx"'
+        return response
+
+    @action(detail=False, methods=['post'], url_path='importar-excel')
+    def importar_excel(self, request):
+        """
+        Importa clientes desde Excel.
+        Columnas: Nombre, Tipo identificación, Nº identificación, CUPS, Cuenta bancaria,
+        Dirección, Teléfono, Correo, Compañía anterior, Compañía actual, Producto,
+        Correo electrónico o carta.
+        """
+        archivo = request.FILES.get('archivo') or request.FILES.get('file')
+
+        if not archivo:
+            return Response(
+                {'error': 'Debe adjuntar un archivo Excel.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            wb = load_workbook(archivo, read_only=True, data_only=True)
+            ws = wb.active
+        except Exception as e:
+            return Response(
+                {'error': f'No se pudo leer el archivo Excel: {str(e)}'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Columnas: 0=Nombre, 1=Tipo id, 2=Nº id, 3=CUPS, 4=Cuenta bancaria, 5=Dirección,
+        # 6=Teléfono, 7=Correo electrónico o carta, 8=Compañía anterior, 9=Compañía actual, 10=Producto
+        creados = 0
+        errores = []
+
+        for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+            if not row or all(cell is None or str(cell).strip() == '' for cell in row):
+                continue
+
+            nombre = (row[0] or '').strip() if len(row) > 0 else ''
+            if not nombre:
+                errores.append(f'Fila {row_idx}: Nombre vacío.')
+                continue
+
+            tipo_id = (row[1] or '').strip() if len(row) > 1 else ''
+            numero_id = (row[2] or '').strip() if len(row) > 2 else ''
+            cups = (row[3] or '').strip() if len(row) > 3 else ''
+            cuenta_bancaria = (row[4] or '').strip() if len(row) > 4 else ''
+            direccion = (row[5] or '').strip() if len(row) > 5 else ''
+            telefono = (row[6] or '').strip() if len(row) > 6 else ''
+            correo_electronico_o_carta = (row[7] or '').strip() if len(row) > 7 else ''
+            compania_ant = (row[8] or '').strip() if len(row) > 8 else ''
+            compania_act = (row[9] or '').strip() if len(row) > 9 else ''
+            producto = (row[10] or '').strip() if len(row) > 10 else ''
+
+            payload = {
+                'servicio_id': None,
+                'nombre': nombre,
+                'tipo_identificacion': tipo_id,
+                'numero_identificacion': numero_id,
+                'telefono': telefono,
+                'correo_electronico_o_carta': correo_electronico_o_carta,
+                'direccion': direccion,
+                'cups': cups,
+                'cuenta_bancaria': cuenta_bancaria,
+                'compania_anterior': compania_ant,
+                'compania_actual': compania_act,
+                'producto': producto,
+                'respuestas': [],
+            }
+
+            serializer = ClienteCreateSerializer(data=payload, context={'request': request})
+            if serializer.is_valid():
+                serializer.save()
+                creados += 1
+            else:
+                err_msg = '; '.join(
+                    f'{k}: {v[0]}' if isinstance(v, list) else f'{k}: {v}'
+                    for k, v in serializer.errors.items()
+                )
+                errores.append(f'Fila {row_idx}: {err_msg}')
+
+        wb.close()
+
+        return Response({
+            'mensaje': f'Se importaron {creados} cliente(s) correctamente.',
+            'creados': creados,
+            'errores': errores[:50],
+        }, status=status.HTTP_200_OK)
