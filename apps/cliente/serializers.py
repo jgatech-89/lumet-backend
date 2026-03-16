@@ -79,7 +79,12 @@ class ClienteSerializer(serializers.ModelSerializer):
             'tipo_identificacion',
             'numero_identificacion',
             'telefono',
-            'correo',
+            'correo_electronico_o_carta',
+            'direccion',
+            'cups',
+            'cuenta_bancaria',
+            'compania_anterior',
+            'compania_actual',
             'estado',
             'estado_venta',
             'vendedor_nombre',
@@ -132,7 +137,12 @@ class ClienteUpdateSerializer(serializers.Serializer):
     tipo_identificacion = serializers.CharField(max_length=10, required=False, allow_blank=True)
     numero_identificacion = serializers.CharField(max_length=50, required=False, allow_blank=True)
     telefono = serializers.CharField(max_length=20, required=False, allow_blank=True)
-    correo = serializers.EmailField(required=False, allow_blank=True)
+    correo_electronico_o_carta = serializers.CharField(max_length=254, required=False, allow_blank=True)
+    direccion = serializers.CharField(max_length=500, required=False, allow_blank=True)
+    cups = serializers.CharField(max_length=100, required=False, allow_blank=True)
+    cuenta_bancaria = serializers.CharField(max_length=100, required=False, allow_blank=True)
+    compania_anterior = serializers.CharField(max_length=255, required=False, allow_blank=True)
+    compania_actual = serializers.CharField(max_length=255, required=False, allow_blank=True)
     respuestas = serializers.ListField(
         child=serializers.DictField(child=serializers.CharField()),
         required=False,
@@ -202,14 +212,18 @@ def _cambiar_estado_venta(cliente, nuevo_estado, user, cliente_empresa=None, usu
 
 class ClienteCreateSerializer(serializers.Serializer):
     """Serializer para crear cliente + respuestas del formulario en una sola petición."""
-    servicio_id = serializers.IntegerField()
+    servicio_id = serializers.IntegerField(required=False, allow_null=True)
     producto = serializers.CharField(max_length=255, required=False, allow_blank=True)
     nombre = serializers.CharField(max_length=255)
     tipo_identificacion = serializers.CharField(max_length=10, required=False, allow_blank=True)
     numero_identificacion = serializers.CharField(max_length=50, required=False, allow_blank=True)
     telefono = serializers.CharField(max_length=20, required=False, allow_blank=True)
-    correo = serializers.EmailField(required=False, allow_blank=True)
+    correo_electronico_o_carta = serializers.CharField(max_length=254, required=False, allow_blank=True)
     direccion = serializers.CharField(max_length=500, required=False, allow_blank=True)
+    cups = serializers.CharField(max_length=100, required=False, allow_blank=True)
+    cuenta_bancaria = serializers.CharField(max_length=100, required=False, allow_blank=True)
+    compania_anterior = serializers.CharField(max_length=255, required=False, allow_blank=True)
+    compania_actual = serializers.CharField(max_length=255, required=False, allow_blank=True)
     respuestas = serializers.ListField(
         child=serializers.DictField(child=serializers.CharField()),
         required=False,

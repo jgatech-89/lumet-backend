@@ -31,12 +31,12 @@ class ClienteAdmin(admin.ModelAdmin):
         'tipo_identificacion',
         'numero_identificacion',
         'telefono',
-        'correo',
+        'correo_electronico_o_carta',
         'estado',
         'fecha_registro',
     ]
     list_filter = ['estado']
-    search_fields = ['nombre', 'numero_identificacion', 'correo', 'telefono']
+    search_fields = ['nombre', 'numero_identificacion', 'correo_electronico_o_carta', 'telefono']
     readonly_fields = ['fecha_registro', 'fecha_elimina', 'usuario_registra', 'usuario_elimina']
     inlines = [FormularioClienteInline, HistorialEstadoVentaInline, ClienteEmpresaInline]
     ordering = ['-fecha_registro']
