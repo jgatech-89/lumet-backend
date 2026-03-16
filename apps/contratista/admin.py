@@ -6,15 +6,14 @@ from .models import Contratista
 class ContratistaAdmin(admin.ModelAdmin):
     list_display = [
         'nombre',
-        'servicio',
         'estado',
         'estado_contratista',
         'usuario_registra',
         'fecha_registro',
     ]
-    list_filter = ['estado', 'estado_contratista', 'servicio']
-    search_fields = ['nombre', 'servicio__nombre']
-    list_select_related = ['servicio', 'usuario_registra', 'usuario_edita', 'usuario_elimina']
+    list_filter = ['estado', 'estado_contratista']
+    search_fields = ['nombre']
+    list_select_related = ['usuario_registra', 'usuario_edita', 'usuario_elimina']
     readonly_fields = [
         'fecha_registro',
         'fecha_edita',
@@ -27,7 +26,7 @@ class ContratistaAdmin(admin.ModelAdmin):
 
     fieldsets = (
         (None, {
-            'fields': ('nombre', 'estado', 'estado_contratista', 'servicio'),
+            'fields': ('nombre', 'estado', 'estado_contratista'),
         }),
         ('Auditoría', {
             'fields': (

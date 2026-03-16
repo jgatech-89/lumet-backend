@@ -8,10 +8,11 @@ class CampoFilter(django_filters.FilterSet):
     contratista = django_filters.NumberFilter(field_name='contratista_id')
     activo = django_filters.BooleanFilter(field_name='activo')
     producto = django_filters.CharFilter(field_name='producto', lookup_expr='iexact')
+    seccion = django_filters.CharFilter(field_name='seccion', lookup_expr='iexact')
 
     class Meta:
         model = Campo
-        fields = ['servicio', 'contratista', 'activo', 'producto']
+        fields = ['servicio', 'contratista', 'activo', 'producto', 'seccion']
 
 
 class CampoOpcionFilter(django_filters.FilterSet):

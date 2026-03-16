@@ -4,13 +4,19 @@ from django.utils import timezone
 from apps.servicio.models import Servicio
 from apps.contratista.models import Contratista
 from apps.persona.models import Persona
-from apps.core.choices import ESTADO, TIPO_CAMPO, SECCIONES_FORMULARIO
+from apps.core.choices import ESTADO, TIPO_CAMPO, SECCIONES_FORMULARIO, ENTIDAD_CAMPO
 
 
 class Campo(models.Model):
     """Campo dinámico configurable para formularios por servicio y contratista."""
     nombre = models.CharField(max_length=255)
     tipo = models.CharField(max_length=20, choices=TIPO_CAMPO)
+    entidad = models.CharField(
+        max_length=50,
+        blank=True,
+        null=True,
+        help_text='Solo cuando tipo=entity_select: servicio, contratista, producto o vendedor.',
+    )
     servicio = models.ForeignKey(
         Servicio,
         on_delete=models.PROTECT,
@@ -40,8 +46,21 @@ class Campo(models.Model):
         default='campos_formulario',
         help_text='Sección del formulario a la que pertenece el campo.',
     )
+    depende_de = models.ForeignKey(
+        'self',
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='campos_dependientes',
+        help_text='Campo del que depende este (ej. Contratista depende de Servicio). Misma sección.',
+    )
     orden = models.PositiveIntegerField(default=0)
-    visible_si = models.CharField(max_length=500, blank=True, default='', help_text='Condición opcional para mostrar el campo según el valor de otro (uso futuro).')
+    visible_si = models.JSONField(
+        null=True,
+        blank=True,
+        verbose_name='Condición de visibilidad',
+        help_text='Condición que determina cuándo se muestra el campo. Ej: {"campo": "tipo_cliente", "valor": "empresa"}',
+    )
     requerido = models.BooleanField(default=False)
     activo = models.BooleanField(default=True)
     estado = models.CharField(max_length=20, choices=ESTADO, default='1')

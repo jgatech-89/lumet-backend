@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from apps.servicio.models import Servicio
 from apps.contratista.models import Contratista
+from apps.relaciones.models import Relacion
 from apps.formularios.services import get_campos_formulario
 from .models import Cliente, FormularioCliente, HistorialEstadoVenta, ClienteEmpresa
 
@@ -118,13 +119,16 @@ class ClienteDetalleSerializer(ClienteSerializer):
         fields = ClienteSerializer.Meta.fields + ['respuestas', 'servicio_id', 'cliente_empresas']
 
     def get_servicio_id(self, obj):
-        """ID del Servicio (ex-Empresa) asociado al contratista del cliente."""
-        if obj.contratista_id:
-            try:
-                return Contratista.objects.get(id=obj.contratista_id).servicio_id
-            except Contratista.DoesNotExist:
-                return None
-        return None
+        """ID del Servicio asociado al contratista del cliente (vía app relaciones)."""
+        if not obj.contratista_id:
+            return None
+        rel = Relacion.objects.filter(
+            destino_tipo='contratista',
+            destino_id=obj.contratista_id,
+            origen_tipo='servicio',
+            estado='1',
+        ).values_list('origen_id', flat=True).first()
+        return rel
 
 
 class ClienteUpdateSerializer(serializers.Serializer):
@@ -233,9 +237,15 @@ class ClienteCreateSerializer(serializers.Serializer):
         except Servicio.DoesNotExist:
             raise serializers.ValidationError({'servicio_id': 'Servicio no válido o inactivo.'})
         try:
-            Contratista.objects.get(id=contratista_id, servicio_id=servicio_id, estado='1')
+            Contratista.objects.get(id=contratista_id, estado='1')
         except Contratista.DoesNotExist:
-            raise serializers.ValidationError({'contratista_id': 'Contratista no válido o no pertenece al servicio.'})
+            raise serializers.ValidationError({'contratista_id': 'Contratista no válido o inactivo.'})
+        if not Relacion.objects.filter(
+            origen_tipo='servicio', origen_id=servicio_id,
+            destino_tipo='contratista', destino_id=contratista_id,
+            estado='1',
+        ).exists():
+            raise serializers.ValidationError({'contratista_id': 'El contratista no está relacionado con ese servicio.'})
 
         campos = list(get_campos_formulario(servicio_id, contratista_id, producto))
         nombres_campos = {c.nombre for c in campos}
@@ -264,7 +274,13 @@ class ClienteCreateSerializer(serializers.Serializer):
             return ''
 
         def es_visible_si_cambio_titular(campo):
-            vs = (getattr(campo, 'visible_si', None) or '').lower().replace('_', ' ').strip()
+            vs = getattr(campo, 'visible_si', None)
+            if vs is None:
+                return False
+            if isinstance(vs, dict):
+                campo_nombre = (vs.get('campo') or '').lower().replace('_', ' ')
+                return 'cambio' in campo_nombre and 'titular' in campo_nombre
+            vs = (vs or '').lower().replace('_', ' ').strip()
             return 'cambio' in vs and 'titular' in vs
 
         def cambio_titular_marcado():
@@ -389,9 +405,15 @@ class ClienteAgregarProductoSerializer(serializers.Serializer):
         except Servicio.DoesNotExist:
             raise serializers.ValidationError({'servicio_id': 'Servicio no válido o inactivo.'})
         try:
-            Contratista.objects.get(id=contratista_id, servicio_id=servicio_id, estado='1')
+            Contratista.objects.get(id=contratista_id, estado='1')
         except Contratista.DoesNotExist:
-            raise serializers.ValidationError({'contratista_id': 'Contratista no válido o no pertenece al servicio.'})
+            raise serializers.ValidationError({'contratista_id': 'Contratista no válido o inactivo.'})
+        if not Relacion.objects.filter(
+            origen_tipo='servicio', origen_id=servicio_id,
+            destino_tipo='contratista', destino_id=contratista_id,
+            estado='1',
+        ).exists():
+            raise serializers.ValidationError({'contratista_id': 'El contratista no está relacionado con ese servicio.'})
 
         campos = list(get_campos_formulario(servicio_id, contratista_id, producto))
         nombres_campos = {c.nombre for c in campos}
@@ -407,7 +429,13 @@ class ClienteAgregarProductoSerializer(serializers.Serializer):
         es_extra_permitido = lambda n: any(norm(n) == norm(p) for p in NOMBRES_EXTRA_PERMITIDOS)
 
         def es_visible_si_cambio_titular(campo):
-            vs = (getattr(campo, 'visible_si', None) or '').lower().replace('_', ' ').strip()
+            vs = getattr(campo, 'visible_si', None)
+            if vs is None:
+                return False
+            if isinstance(vs, dict):
+                campo_nombre = (vs.get('campo') or '').lower().replace('_', ' ')
+                return 'cambio' in campo_nombre and 'titular' in campo_nombre
+            vs = (vs or '').lower().replace('_', ' ').strip()
             return 'cambio' in vs and 'titular' in vs
 
         def cambio_titular_marcado():

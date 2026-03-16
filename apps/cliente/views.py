@@ -16,6 +16,8 @@ from reportlab.lib.units import cm
 from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
 
+from apps.relaciones.models import Relacion
+from apps.servicio.models import Servicio
 from .models import Cliente, FormularioCliente, HistorialEstadoVenta, ClienteEmpresa
 from .serializers import (
     ClienteSerializer,
@@ -67,8 +69,13 @@ def _servicio_contratista_producto_para_cliente(cliente):
             (ce.contratista.nombre if ce.contratista else ''),
             ce.producto or '',
         )
-    contratista = Contratista.objects.filter(id=cliente.contratista_id).select_related('servicio').first() if cliente.contratista_id else None
-    servicio_nombre = contratista.servicio.nombre if contratista and contratista.servicio_id else ''
+    contratista = Contratista.objects.filter(id=cliente.contratista_id).first() if cliente.contratista_id else None
+    servicio_nombre = ''
+    if contratista:
+        rel = Relacion.objects.filter(destino_tipo='contratista', destino_id=contratista.id, origen_tipo='servicio', estado='1').values_list('origen_id', flat=True).first()
+        if rel:
+            s = Servicio.objects.filter(id=rel, estado='1').first()
+            servicio_nombre = s.nombre if s else ''
     contratista_nombre = contratista.nombre if contratista else ''
     producto = (cliente.producto or '').strip()
     return (servicio_nombre, contratista_nombre, producto)
@@ -111,8 +118,13 @@ def _productos_para_pdf(cliente):
             }
             for ce in productos_ce
         ]
-    contratista = Contratista.objects.filter(id=cliente.contratista_id).select_related('servicio').first() if cliente.contratista_id else None
-    servicio_nombre = contratista.servicio.nombre if contratista and contratista.servicio_id else '-'
+    contratista = Contratista.objects.filter(id=cliente.contratista_id).first() if cliente.contratista_id else None
+    servicio_nombre = '-'
+    if contratista:
+        rel = Relacion.objects.filter(destino_tipo='contratista', destino_id=contratista.id, origen_tipo='servicio', estado='1').values_list('origen_id', flat=True).first()
+        if rel:
+            s = Servicio.objects.filter(id=rel, estado='1').first()
+            servicio_nombre = s.nombre if s else '-'
     contratista_nombre = contratista.nombre if contratista else '-'
     producto = (cliente.producto or '').strip() or '-'
     return [{'servicio_nombre': servicio_nombre, 'contratista_nombre': contratista_nombre, 'producto': producto, 'tipo_cliente': '-'}]
@@ -180,8 +192,13 @@ def _productos_para_excel(cliente):
             }
             for ce in productos_ce
         ]
-    contratista = Contratista.objects.filter(id=cliente.contratista_id).select_related('servicio').first() if cliente.contratista_id else None
-    servicio_nombre = contratista.servicio.nombre if contratista and contratista.servicio_id else ''
+    contratista = Contratista.objects.filter(id=cliente.contratista_id).first() if cliente.contratista_id else None
+    servicio_nombre = ''
+    if contratista:
+        rel = Relacion.objects.filter(destino_tipo='contratista', destino_id=contratista.id, origen_tipo='servicio', estado='1').values_list('origen_id', flat=True).first()
+        if rel:
+            s = Servicio.objects.filter(id=rel, estado='1').first()
+            servicio_nombre = s.nombre if s else ''
     contratista_nombre = contratista.nombre if contratista else ''
     producto = (cliente.producto or '').strip()
     estado_venta = _estado_venta_cliente(cliente)

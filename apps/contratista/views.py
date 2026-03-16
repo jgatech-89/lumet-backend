@@ -16,8 +16,7 @@ from .filters import ContratistaFilter
         tags=['Contratistas'],
         summary='Listar contratistas',
         parameters=[
-            OpenApiParameter(name='servicio', description='Filtrar por ID de servicio', required=False, type=int),
-            OpenApiParameter(name='search', description='Buscar por nombre de contratista o servicio', required=False, type=str),
+            OpenApiParameter(name='search', description='Buscar por nombre de contratista', required=False, type=str),
             OpenApiParameter(name='estado', description='Filtrar por estado: 1=Activa, 0=Inactiva. Omitir = todos', required=False, type=str, enum=['1', '0']),
         ],
     ),
@@ -32,11 +31,10 @@ class ContratistaViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, SearchFilter]
     filterset_class = ContratistaFilter
-    search_fields = ['nombre', 'servicio__nombre']
+    search_fields = ['nombre']
 
     def get_queryset(self):
         qs = Contratista.objects.filter(estado='1').select_related(
-            'servicio',
             'usuario_registra',
             'usuario_edita',
             'usuario_elimina',

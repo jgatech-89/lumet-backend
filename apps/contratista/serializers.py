@@ -1,5 +1,4 @@
 from rest_framework import serializers
-from apps.servicio.models import Servicio
 from .models import Contratista
 
 
@@ -19,11 +18,6 @@ def _nombre_persona(persona):
 
 
 class ContratistaSerializer(serializers.ModelSerializer):
-    servicio_nombre = serializers.SerializerMethodField()
-    servicio_id = serializers.PrimaryKeyRelatedField(
-        queryset=Servicio.objects.filter(estado='1'),
-        source='servicio',
-    )
     usuario_registra_nombre = serializers.SerializerMethodField()
     usuario_edita_nombre = serializers.SerializerMethodField()
     usuario_elimina_nombre = serializers.SerializerMethodField()
@@ -44,8 +38,6 @@ class ContratistaSerializer(serializers.ModelSerializer):
             'nombre',
             'estado',
             'estado_contratista',
-            'servicio_id',
-            'servicio_nombre',
             'usuario_registra_id',
             'usuario_registra_nombre',
             'usuario_edita_id',
@@ -65,9 +57,6 @@ class ContratistaSerializer(serializers.ModelSerializer):
             'fecha_elimina',
         ]
 
-    def get_servicio_nombre(self, obj):
-        return obj.servicio.nombre if obj.servicio else None
-
     def get_usuario_registra_nombre(self, obj):
         return _nombre_persona(obj.usuario_registra)
 
@@ -77,23 +66,14 @@ class ContratistaSerializer(serializers.ModelSerializer):
     def get_usuario_elimina_nombre(self, obj):
         return _nombre_persona(obj.usuario_elimina)
 
-    def validate(self, attrs):
-        """
-        No permitir mismo nombre en el mismo servicio si ya existe un contratista ACTIVO (estado=1).
-        """
-        nombre = attrs.get('nombre')
-        servicio = attrs.get('servicio')
-        if not nombre or not servicio:
-            return attrs
-        qs = Contratista.objects.filter(
-            nombre__iexact=nombre.strip(),
-            servicio=servicio,
-            estado='1',
-        )
+    def validate_nombre(self, value):
+        """No permitir nombre duplicado entre contratistas activos (estado=1)."""
+        nombre = (value or '').strip()
+        if not nombre:
+            return value
+        qs = Contratista.objects.filter(nombre__iexact=nombre, estado='1')
         if self.instance:
             qs = qs.exclude(pk=self.instance.pk)
         if qs.exists():
-            raise serializers.ValidationError({
-                'nombre': 'Ya existe un contratista activo con este nombre en el servicio.',
-            })
-        return attrs
+            raise serializers.ValidationError('Ya existe un contratista activo con este nombre.')
+        return value

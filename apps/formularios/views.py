@@ -10,7 +10,12 @@ from drf_spectacular.utils import extend_schema_view, extend_schema, OpenApiPara
 from .models import Campo, CampoOpcion
 from .serializers import CampoReadSerializer, CampoWriteSerializer, CampoOpcionSerializer, FormularioCampoSerializer
 from .filters import CampoFilter, CampoOpcionFilter
-from .services import get_campos_formulario, reordenar_campos_para_insertar
+from .services import (
+    get_campos_formulario,
+    get_campos_formulario_por_producto_id,
+    reordenar_campos_para_insertar,
+)
+from .services import _get_campos_base_campos_formulario, _filtrar_campos_por_contexto
 from apps.core.choices import ESTADO_VENTA
 
 
@@ -417,21 +422,24 @@ class OpcionesEstadoVentaAPIView(APIView):
 
 @extend_schema(
     tags=['Formularios'],
-    summary='Campos del formulario por servicio, contratista y producto',
+    summary='Campos del formulario por servicio, contratista, producto y sección',
     parameters=[
         OpenApiParameter(name='servicio_id', description='ID del servicio (opcional si se piden campos globales)', required=False, type=int),
         OpenApiParameter(name='contratista_id', description='ID del contratista (opcional si se piden campos globales)', required=False, type=int),
         OpenApiParameter(name='producto', description='Valor del producto para filtrar campos (opcional)', required=False, type=str),
+        OpenApiParameter(name='producto_id', description='ID del producto; en seccion=campos_formulario carga campos base + relacionados vía Relacion', required=False, type=int),
         OpenApiParameter(name='solo_sin_producto', description='Si true, solo devuelve campos sin restricción por producto', required=False, type=bool),
+        OpenApiParameter(name='seccion', description='Filtrar por sección: cliente, datos_base, campos_formulario, vendedor', required=False, type=str),
     ],
     responses={200: FormularioCampoSerializer(many=True)},
 )
 class FormularioCamposAPIView(APIView):
     """
-    GET /api/formulario/?servicio_id=1&contratista_id=2&producto=luz
-    Devuelve los campos configurados para el formulario (activos, ordenados, con opciones para select).
-    Si no se pasan servicio_id ni contratista_id, devuelve campos globales.
-    Si se pasa producto, filtra campos que aplican a ese producto (o producto vacío = todos).
+    GET /api/formulario/?servicio_id=1&contratista_id=2&seccion=campos_formulario
+    Sin producto_id: solo campos base (selector de producto).
+    GET /api/formulario/?servicio_id=1&contratista_id=2&producto_id=6&seccion=campos_formulario
+    Con producto_id: campos base + campos relacionados al producto (tabla Relacion).
+    Para otras secciones se mantiene el comportamiento por producto (valor).
     """
     permission_classes = [IsAuthenticated]
 
@@ -439,23 +447,43 @@ class FormularioCamposAPIView(APIView):
         servicio_id = request.query_params.get('servicio_id')
         contratista_id = request.query_params.get('contratista_id')
         producto = (request.query_params.get('producto') or '').strip() or None
-        solo_sin_producto = request.query_params.get('solo_sin_producto', '').lower() in ('true', '1', 'yes')
-        if not servicio_id and not contratista_id:
-            campos = get_campos_formulario(None, None, producto, solo_sin_producto)
-        else:
-            if not servicio_id or not contratista_id:
-                return Response(
-                    {'error': 'Se requieren ambos parámetros servicio_id y contratista_id, o ninguno para campos globales.'},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
+        producto_id_raw = request.query_params.get('producto_id')
+        producto_id = None
+        if producto_id_raw not in (None, ''):
             try:
-                servicio_id = int(servicio_id)
-                contratista_id = int(contratista_id)
+                producto_id = int(producto_id_raw)
+            except (TypeError, ValueError):
+                pass
+        solo_sin_producto = request.query_params.get('solo_sin_producto', '').lower() in ('true', '1', 'yes')
+        seccion = (request.query_params.get('seccion') or '').strip() or None
+
+        sid, cid = None, None
+        if servicio_id and contratista_id:
+            try:
+                sid = int(servicio_id)
+                cid = int(contratista_id)
             except (TypeError, ValueError):
                 return Response(
                     {'error': 'servicio_id y contratista_id deben ser números.'},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-            campos = get_campos_formulario(servicio_id, contratista_id, producto, solo_sin_producto)
+        elif servicio_id or contratista_id:
+            return Response(
+                {'error': 'Se requieren ambos parámetros servicio_id y contratista_id, o ninguno para campos globales.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if seccion == 'campos_formulario':
+            if producto_id is not None:
+                campos = get_campos_formulario_por_producto_id(sid, cid, producto_id)
+            else:
+                base = _get_campos_base_campos_formulario(sid, cid)
+                campos = _filtrar_campos_por_contexto(list(base), sid, cid, None)
+        else:
+            if not servicio_id and not contratista_id:
+                campos = get_campos_formulario(None, None, producto, solo_sin_producto, seccion)
+            else:
+                campos = get_campos_formulario(sid, cid, producto, solo_sin_producto, seccion)
+
         serializer = FormularioCampoSerializer(campos, many=True)
         return Response(serializer.data)
