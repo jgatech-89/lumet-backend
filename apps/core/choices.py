@@ -6,6 +6,7 @@ Choices centralizados del sistema.
 TIPO_IDENTIFICACION = [
     ('CC', 'Cédula de ciudadanía'),
     ('CE', 'Cédula de extranjería'),
+    ('DNI', 'DNI'),
     ('NIT', 'NIT'),
     ('PAS', 'Pasaporte'),
     ('PPT', 'Permiso provisional de trabajo'),
@@ -46,4 +47,27 @@ TIPO_CAMPO = [
     ('date', 'Fecha'),
     ('checkbox', 'Checkbox'),
     ('textarea', 'Área de texto'),
+]
+
+# Secciones fijas del formulario (form builder de campos dinámicos).
+SECCIONES_FORMULARIO = [
+    ('cliente', 'Cliente'),
+    ('datos_base', 'Datos base'),
+    ('campos_formulario', 'Campos del formulario'),
+    ('vendedor', 'Vendedor'),
+]
+
+# Estado de venta: preparado para manejarse por select (configurable).
+ESTADO_VENTA = [
+    ('venta_iniciada', 'Venta iniciada'),
+    ('completada', 'Venta completada'),
+    ('cancelada', 'Venta cancelada'),
+    ('pospuesta', 'Venta pospuesta'),
+    ('pendiente', 'Venta pendiente'),
+]
+
+# Tipo de cliente: 1 = particular, 2 = empresa.
+TIPO_CLIENTE = [
+    ('1', 'Particular'),
+    ('2', 'Empresa'),
 ]

@@ -4,41 +4,71 @@ from django.utils import timezone
 from apps.empresa.models import Empresa
 from apps.servicio.models import Servicio
 from apps.persona.models import Persona
-from apps.core.choices import ESTADO, TIPO_CAMPO
+from apps.core.choices import ESTADO, TIPO_CAMPO, SECCIONES_FORMULARIO
 
 
 class Campo(models.Model):
     """Campo dinámico configurable para formularios por empresa y servicio."""
     nombre = models.CharField(max_length=255)
     tipo = models.CharField(max_length=20, choices=TIPO_CAMPO)
-    empresa = models.ForeignKey(Empresa, on_delete=models.PROTECT, related_name='campos_formulario')
-    servicio = models.ForeignKey(Servicio, on_delete=models.PROTECT, related_name='campos_formulario')
+    empresa = models.ForeignKey(
+        Empresa,
+        on_delete=models.PROTECT,
+        related_name='campos_formulario',
+        null=True,
+        blank=True,
+        help_text='Si es null, aplica a todas las empresas.'
+    )
+    servicio = models.ForeignKey(
+        Servicio,
+        on_delete=models.PROTECT,
+        related_name='campos_formulario',
+        null=True,
+        blank=True,
+        help_text='Si es null, aplica a todos los servicios de la empresa.'
+    )
+    producto = models.CharField(
+        max_length=255,
+        blank=True,
+        default='',
+        help_text='Valor de la opción del campo Producto al que pertenece este campo (opciones de otro campo).'
+    )
     placeholder = models.CharField(max_length=255, blank=True, default='')
+    seccion = models.CharField(
+        max_length=30,
+        choices=SECCIONES_FORMULARIO,
+        default='campos_formulario',
+        help_text='Sección del formulario a la que pertenece el campo.',
+    )
     orden = models.PositiveIntegerField(default=0)
-    help_text = models.CharField(max_length=500, blank=True, default='')
-    default_value = models.CharField(max_length=500, blank=True, default='')
-    visible_si = models.CharField(max_length=500, blank=True, default='', help_text='Condición opcional para mostrar el campo según el valor de otro (uso futuro).')
+    visible_si = models.JSONField(
+        null=True,
+        blank=True,
+        default=None,
+        help_text='Condición opcional para mostrar el campo según el valor de otro (objeto JSON o null). En BD es jsonb.',
+    )
     requerido = models.BooleanField(default=False)
     activo = models.BooleanField(default=True)
     estado = models.CharField(max_length=20, choices=ESTADO, default='1')
-    created_at = models.DateTimeField(auto_now_add=True)
-    created_by = models.ForeignKey(Persona, on_delete=models.SET_NULL, null=True, blank=True, related_name='campos_formulario_creados', verbose_name='Creado por')
+    fecha_registra = models.DateTimeField(auto_now_add=True)
+    usuario_registra = models.ForeignKey(Persona, on_delete=models.SET_NULL, null=True, blank=True, related_name='campos_formulario_registrados', verbose_name='Usuario registra')
     updated_at = models.DateTimeField(auto_now=True)
     updated_by = models.ForeignKey(Persona, on_delete=models.SET_NULL, null=True, blank=True, related_name='campos_formulario_actualizados', verbose_name='Actualizado por')
-    deleted_at = models.DateTimeField(null=True, blank=True, editable=False)
-    deleted_by = models.ForeignKey(Persona, on_delete=models.SET_NULL, null=True, blank=True, related_name='campos_formulario_eliminados', verbose_name='Eliminado por')
+    fecha_elimina = models.DateTimeField(null=True, blank=True, editable=False)
+    usuario_elimina = models.ForeignKey(Persona, on_delete=models.SET_NULL, null=True, blank=True, related_name='campos_formulario_eliminados', verbose_name='Usuario elimina')
 
     class Meta:
         verbose_name = 'Campo'
         verbose_name_plural = 'Campos'
-        ordering = ['orden', 'id']
+        ordering = ['seccion', 'orden', 'id']
 
     def delete(self, using=None, keep_parents=False):
-        """Eliminación lógica: marca deleted_at."""
-        self.deleted_at = timezone.now()
-        update_fields = ['deleted_at', 'updated_at']
-        if self.deleted_by_id is not None:
-            update_fields.append('deleted_by_id')
+        """Eliminación lógica: marca fecha_elimina y estado=0."""
+        self.fecha_elimina = timezone.now()
+        self.estado = '0'
+        update_fields = ['fecha_elimina', 'estado', 'updated_at']
+        if self.usuario_elimina_id is not None:
+            update_fields.append('usuario_elimina_id')
         self.save(update_fields=update_fields)
 
     def __str__(self):
@@ -52,6 +82,11 @@ class CampoOpcion(models.Model):
     value = models.CharField(max_length=255)
     orden = models.PositiveIntegerField(default=0)
     activo = models.BooleanField(default=True)
+    estado = models.CharField(max_length=20, choices=ESTADO, default='1')
+    fecha_registra = models.DateTimeField(auto_now_add=True)
+    usuario_registra = models.ForeignKey(Persona, on_delete=models.SET_NULL, null=True, blank=True, related_name='campo_opciones_registradas', verbose_name='Usuario registra')
+    fecha_elimina = models.DateTimeField(null=True, blank=True, editable=False)
+    usuario_elimina = models.ForeignKey(Persona, on_delete=models.SET_NULL, null=True, blank=True, related_name='campo_opciones_eliminadas', verbose_name='Usuario elimina')
 
     class Meta:
         verbose_name = 'Opción de campo'

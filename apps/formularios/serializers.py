@@ -1,3 +1,4 @@
+import json
 from rest_framework import serializers
 from apps.empresa.models import Empresa
 from apps.servicio.models import Servicio
@@ -20,9 +21,25 @@ class CampoOpcionNestedSerializer(serializers.ModelSerializer):
 
 class CampoReadSerializer(serializers.ModelSerializer):
     """Serializer de lectura para Campo (incluye opciones y nombres de FKs)."""
-    empresa_nombre = serializers.CharField(source='empresa.nombre', read_only=True)
-    servicio_nombre = serializers.CharField(source='servicio.nombre', read_only=True)
+    empresa_nombre = serializers.SerializerMethodField()
+    servicio_nombre = serializers.SerializerMethodField()
+
+    def get_empresa_nombre(self, obj):
+        # En UI se muestra en la columna "Servicio"
+        # Si no hay empresa asociada (aplica a todos), mostramos "Todos los servicios".
+        return obj.empresa.nombre if obj.empresa else 'Todos los servicios'
     opciones = CampoOpcionNestedSerializer(many=True, read_only=True)
+
+    def get_servicio_nombre(self, obj):
+        # En UI se muestra en la columna "Contratista"
+        # - Si hay servicio concreto: su nombre.
+        # - Si hay empresa pero no servicio: todos los contratistas de ese servicio.
+        # - Si tampoco hay empresa (aplica global): todos los servicios y contratistas.
+        if obj.servicio:
+            return obj.servicio.nombre
+        if obj.empresa:
+            return 'Todos los contratistas'
+        return 'Todos los servicios y contratistas'
 
     class Meta:
         model = Campo
@@ -34,30 +51,45 @@ class CampoReadSerializer(serializers.ModelSerializer):
             'empresa_nombre',
             'servicio',
             'servicio_nombre',
+            'producto',
             'placeholder',
+            'seccion',
             'orden',
-            'help_text',
-            'default_value',
             'visible_si',
             'requerido',
             'activo',
             'estado',
             'opciones',
-            'created_at',
-            'created_by',
+            'fecha_registra',
+            'usuario_registra',
             'updated_at',
             'updated_by',
-            'deleted_at',
-            'deleted_by',
+            'fecha_elimina',
+            'usuario_elimina',
         ]
         read_only_fields = fields
 
 
 
 class CampoWriteSerializer(serializers.ModelSerializer):
-    """Serializer de escritura para Campo (sin opciones anidadas)."""
-    empresa_id = serializers.PrimaryKeyRelatedField(queryset=Empresa.objects.filter(estado='1'), source='empresa')
-    servicio_id = serializers.PrimaryKeyRelatedField(queryset=Servicio.objects.filter(estado='1'), source='servicio')
+    """Serializer de escritura para Campo (sin opciones anidadas).
+    Si aplicar_todos_empresas=True: empresa_id y servicio_id quedan null (aplica a todo).
+    Si aplicar_todos_servicios=True (y empresa definida): servicio_id queda null (aplica a todos los servicios de la empresa).
+    """
+    empresa_id = serializers.PrimaryKeyRelatedField(
+        queryset=Empresa.objects.filter(estado='1'),
+        source='empresa',
+        required=False,
+        allow_null=True
+    )
+    aplicar_todos_empresas = serializers.BooleanField(write_only=True, required=False, default=False)
+    aplicar_todos_servicios = serializers.BooleanField(write_only=True, required=False, default=False)
+    servicio_id = serializers.PrimaryKeyRelatedField(
+        queryset=Servicio.objects.filter(estado='1'),
+        source='servicio',
+        required=False,
+        allow_null=True
+    )
 
     class Meta:
         model = Campo
@@ -66,17 +98,48 @@ class CampoWriteSerializer(serializers.ModelSerializer):
             'nombre',
             'tipo',
             'empresa_id',
+            'aplicar_todos_empresas',
+            'aplicar_todos_servicios',
             'servicio_id',
+            'producto',
             'placeholder',
+            'seccion',
             'orden',
-            'help_text',
-            'default_value',
             'visible_si',
             'requerido',
             'activo',
             'estado',
         ]
         read_only_fields = ['id']
+
+    def validate(self, attrs):
+        # visible_si en BD es jsonb: '' no es válido; normalizar a None
+        if 'visible_si' in attrs:
+            v = attrs['visible_si']
+            if v == '' or (isinstance(v, str) and v.strip() == ''):
+                attrs['visible_si'] = None
+            elif isinstance(v, str):
+                try:
+                    attrs['visible_si'] = json.loads(v) if v.strip() else None
+                except (ValueError, TypeError):
+                    attrs['visible_si'] = None
+        aplicar_empresas = attrs.pop('aplicar_todos_empresas', False)
+        aplicar_servicios = attrs.pop('aplicar_todos_servicios', False)
+        if aplicar_empresas:
+            attrs['empresa'] = None
+            attrs['servicio'] = None
+        else:
+            if not attrs.get('empresa'):
+                raise serializers.ValidationError({
+                    'empresa_id': 'Seleccione una empresa o marque "Aplicar a todas las empresas".'
+                })
+            if aplicar_servicios:
+                attrs['servicio'] = None
+            elif not attrs.get('servicio'):
+                raise serializers.ValidationError({
+                    'servicio_id': 'Seleccione un servicio o marque "Aplicar a todos los servicios".'
+                })
+        return attrs
 
 
 class FormularioCampoSerializer(serializers.ModelSerializer):
@@ -90,9 +153,9 @@ class FormularioCampoSerializer(serializers.ModelSerializer):
             'nombre',
             'tipo',
             'placeholder',
-            'help_text',
-            'default_value',
+            'seccion',
             'requerido',
+            'visible_si',
             'opciones',
         ]
 
@@ -100,7 +163,7 @@ class FormularioCampoSerializer(serializers.ModelSerializer):
         if obj.tipo != 'select':
             return []
         opciones_activas = sorted(
-            (o for o in obj.opciones.all() if o.activo),
+            (o for o in obj.opciones.all() if o.activo and o.estado == '1'),
             key=lambda o: (o.orden, o.id),
         )
         return [{'label': o.label, 'value': o.value} for o in opciones_activas]

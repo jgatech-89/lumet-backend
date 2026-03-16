@@ -7,10 +7,11 @@ class CampoFilter(django_filters.FilterSet):
     empresa = django_filters.NumberFilter(field_name='empresa_id')
     servicio = django_filters.NumberFilter(field_name='servicio_id')
     activo = django_filters.BooleanFilter(field_name='activo')
+    producto = django_filters.CharFilter(field_name='producto', lookup_expr='iexact')
 
     class Meta:
         model = Campo
-        fields = ['empresa', 'servicio', 'activo']
+        fields = ['empresa', 'servicio', 'activo', 'producto']
 
 
 class CampoOpcionFilter(django_filters.FilterSet):
