@@ -405,16 +405,21 @@ class ClienteCreateSerializer(serializers.Serializer):
             campos_requeridos.add(c.nombre)
 
         def _nombre_es_campo_repetido_valido(nombre_campo):
-            """Permite 'linea adicional (1)', 'linea adicional (2)' cuando existe campo 'linea adicional (x)' con repetir_segun."""
+            """Permite 'linea adicional (1)', 'linea adicional (2)' cuando existe campo 'linea adicional (x)' o 'linea adicional' con repetir_segun."""
             for c in campos:
                 vs = getattr(c, 'visible_si', None)
                 if not vs or not isinstance(vs, dict) or not vs.get('repetir_segun'):
                     continue
                 base = (c.nombre or '').strip()
-                if not base or ('(x)' not in base.lower() and '($)' not in base.lower()):
+                if not base:
                     continue
-                pat = '^' + re.sub(r'\([x$]\)', r'(\\d+)', re.escape(base), flags=re.I) + r'$'
-                if re.match(pat, (nombre_campo or ''), re.I):
+                base_lower = base.lower()
+                if '(x)' in base_lower or '($)' in base_lower:
+                    pat = '^' + re.sub(r'\([x$]\)', r'(\\d+)', re.escape(base), flags=re.I) + r'$'
+                else:
+                    # Campo sin (x): aceptar "Linea adicional (1)", "Linea adicional (2)", etc.
+                    pat = '^' + re.escape(base) + r'\s*\((\d+)\)\s*$'
+                if re.match(pat, (nombre_campo or '').strip(), re.I):
                     return True
             return False
 
@@ -573,10 +578,14 @@ class ClienteAgregarProductoSerializer(serializers.Serializer):
                 if not vs or not isinstance(vs, dict) or not vs.get('repetir_segun'):
                     continue
                 base = (c.nombre or '').strip()
-                if not base or ('(x)' not in base.lower() and '($)' not in base.lower()):
+                if not base:
                     continue
-                pat = '^' + re.sub(r'\([x$]\)', r'(\\d+)', re.escape(base), flags=re.I) + r'$'
-                if re.match(pat, (nombre_campo or ''), re.I):
+                base_lower = base.lower()
+                if '(x)' in base_lower or '($)' in base_lower:
+                    pat = '^' + re.sub(r'\([x$]\)', r'(\\d+)', re.escape(base), flags=re.I) + r'$'
+                else:
+                    pat = '^' + re.escape(base) + r'\s*\((\d+)\)\s*$'
+                if re.match(pat, (nombre_campo or '').strip(), re.I):
                     return True
             return False
 
