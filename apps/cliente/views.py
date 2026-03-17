@@ -713,9 +713,14 @@ class ClienteViewSet(viewsets.ModelViewSet):
     def descargar_plantilla(self, request):
         """
         Descarga plantilla Excel para importación masiva de clientes.
-        Columnas: Nombre completo, Tipo identificación, Nº identificación, CUPS, Dirección,
-        Teléfono, Correo, Compañía anterior, Compañía actual, Producto, Correo electrónico o carta.
+        Columnas: Nombre completo, Tipo identificación (NIE/PAS/DNI/CIF), Nº identificación,
+        Cuenta bancaria, Dirección, Teléfono, Correo o carta o papel, Compañía anterior,
+        Compañía actual (selector), Producto, CUPS (opcional si LUZ/GAS), Mantenimiento (opcional si/no).
         """
+        from apps.core.choices import TIPO_IDENTIFICACION
+        from apps.servicio.models import Servicio as ServicioModel
+        from openpyxl.worksheet.datavalidation import DataValidation
+
         wb = Workbook()
         ws = wb.active
         ws.title = 'Clientes'
@@ -727,12 +732,12 @@ class ClienteViewSet(viewsets.ModelViewSet):
             'Cuenta bancaria',
             'Dirección',
             'Teléfono',
-            'Correo electrónico o carta',
+            'Correo o carta o papel',
             'Compañía anterior',
             'Compañía actual',
-            'Servicio',
-            'Compañía actual',
             'Producto',
+            'CUPS',
+            'Mantenimiento',
         ]
         ws.append(headers)
 
@@ -754,21 +759,60 @@ class ClienteViewSet(viewsets.ModelViewSet):
 
         # Fila de ejemplo
         ws.append([
-            'Ejemplo: Juan Pérez',
+            'Juan Pérez',
             'DNI',
-            '123456789',
+            '12345678A',
             'ES12 3456 7890 1234 5678 90',
             'Calle Ejemplo 123',
             '600123456',
             'ejemplo@correo.com',
             'Empresa anterior S.L.',
-            'Empresa actual S.A.',
-            'Nombre del servicio (empresa)',
-            'Nombre de la compañía actual (servicio)',
+            'Nombre compañía actual',
             'Producto A',
+            '',
+            'si',
         ])
 
-        column_widths = [22, 18, 20, 28, 28, 14, 28, 22, 22, 28, 28, 18]
+        # Hoja Opciones con valores válidos para validación
+        ws_opciones = wb.create_sheet('Opciones', 1)
+        ws_opciones['A1'] = 'Tipo identificación'
+        for i, (val, _) in enumerate(TIPO_IDENTIFICACION, start=2):
+            ws_opciones.cell(row=i, column=1, value=val)
+        ws_opciones['B1'] = 'Compañías actuales'
+        servicios = ServicioModel.objects.filter(estado='1', fecha_elimina__isnull=True).order_by('nombre')
+        for i, s in enumerate(servicios, start=2):
+            ws_opciones.cell(row=i, column=2, value=s.nombre or '')
+        ws_opciones['C1'] = 'Mantenimiento'
+        ws_opciones['C2'] = 'si'
+        ws_opciones['C3'] = 'no'
+
+        # Validación de datos: Tipo identificación (col B)
+        tipo_opts = ','.join(v[0] for v in TIPO_IDENTIFICACION)
+        dv_tipo = DataValidation(
+            type='list',
+            formula1=f'"{tipo_opts}"',
+            allow_blank=True,
+        )
+        dv_tipo.add(f'B2:B1000')
+        ws.add_data_validation(dv_tipo)
+
+        # Validación: Compañía actual (col I) - referencia a hoja Opciones
+        if servicios.exists():
+            n_serv = servicios.count() + 1
+            dv_comp = DataValidation(
+                type='list',
+                formula1=f"Opciones!$B$2:$B${n_serv}",
+                allow_blank=True,
+            )
+            dv_comp.add('I2:I1000')
+            ws.add_data_validation(dv_comp)
+
+        # Validación: Mantenimiento (col L)
+        dv_mant = DataValidation(type='list', formula1='"si,no"', allow_blank=True)
+        dv_mant.add('L2:L1000')
+        ws.add_data_validation(dv_mant)
+
+        column_widths = [22, 18, 18, 28, 28, 14, 24, 22, 28, 18, 20, 14]
         for col, width in enumerate(column_widths, start=1):
             ws.column_dimensions[ws.cell(row=1, column=col).column_letter].width = width
 
@@ -790,10 +834,13 @@ class ClienteViewSet(viewsets.ModelViewSet):
     def importar_excel(self, request):
         """
         Importa clientes desde Excel.
-        Columnas: Nombre, Tipo identificación, Nº identificación, CUPS, Cuenta bancaria,
-        Dirección, Teléfono, Correo, Compañía anterior, Compañía actual, Producto,
-        Correo electrónico o carta.
+        Columnas: Nombre completo, Tipo identificación (NIE/PAS/DNI/CIF), Nº identificación,
+        Cuenta bancaria, Dirección, Teléfono, Correo o carta o papel, Compañía anterior,
+        Compañía actual (selector), Producto, CUPS (opcional), Mantenimiento (opcional si/no).
         """
+        from apps.core.choices import TIPO_IDENTIFICACION
+        from apps.servicio.models import Servicio as ServicioModel
+
         archivo = request.FILES.get('archivo') or request.FILES.get('file')
 
         if not archivo:
@@ -811,10 +858,10 @@ class ClienteViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Columnas: 0=Nombre, 1=Tipo id, 2=Nº id, 3=Cuenta bancaria, 4=Dirección,
-        # 6=Teléfono, 7=Correo, 8=Compañía anterior, 9=Compañía actual, 10=Servicio, 11=Contratista, 12=Producto
-        from apps.empresa.models import Empresa
-        from apps.servicio.models import Servicio as ServicioModel
+        # Columnas: 0=Nombre, 1=Tipo id, 2=Nº id, 3=Cuenta bancaria, 4=Dirección, 5=Teléfono,
+        # 6=Correo, 7=Compañía anterior, 8=Compañía actual, 9=Producto, 10=CUPS, 11=Mantenimiento
+        tipos_validos = {v[0] for v in TIPO_IDENTIFICACION}
+        productos_con_cups = {'luz', 'gas', 'luz gas'}
 
         creados = 0
         errores = []
@@ -828,7 +875,13 @@ class ClienteViewSet(viewsets.ModelViewSet):
                 errores.append(f'Fila {row_idx}: Nombre vacío.')
                 continue
 
-            tipo_id = (row[1] or '').strip() if len(row) > 1 else ''
+            tipo_id = (row[1] or '').strip().upper() if len(row) > 1 else ''
+            if tipo_id and tipo_id not in tipos_validos:
+                errores.append(
+                    f'Fila {row_idx}: Tipo identificación "{tipo_id}" no válido. Use: {", ".join(sorted(tipos_validos))}.'
+                )
+                continue
+
             numero_id = (row[2] or '') if len(row) > 2 else ''
             cuenta_bancaria = (row[3] or '').strip() if len(row) > 3 else ''
             direccion = (row[4] or '').strip() if len(row) > 4 else ''
@@ -836,40 +889,21 @@ class ClienteViewSet(viewsets.ModelViewSet):
             correo_electronico_o_carta = (row[6] or '').strip() if len(row) > 6 else ''
             compania_ant = (row[7] or '').strip() if len(row) > 7 else ''
             compania_act = (row[8] or '').strip() if len(row) > 8 else ''
-            # Plantilla nueva: columnas 9=Servicio, 10=Contratista, 11=Producto. Antigua: 9=Producto.
-            tiene_columnas_servicio_contratista = len(row) > 10
-            if tiene_columnas_servicio_contratista:
-                servicio_nombre = (row[9] or '').strip() if len(row) > 9 else ''
-                contratista_nombre = (row[10] or '').strip() if len(row) > 10 else ''
-                producto = (row[11] or '').strip() if len(row) > 11 else ''
-            else:
-                servicio_nombre = ''
-                contratista_nombre = ''
-                producto = (row[9] or '').strip() if len(row) > 9 else ''
+            producto = (row[9] or '').strip() if len(row) > 9 else ''
+            cups = (row[10] or '').strip() if len(row) > 10 else ''
+            mantenimiento = (row[11] or '').strip().lower() if len(row) > 11 else ''
 
             servicio_id = None
-            if tiene_columnas_servicio_contratista and (servicio_nombre or contratista_nombre):
-                empresa = Empresa.objects.filter(
-                    nombre__iexact=servicio_nombre, estado='1'
-                ).first() if servicio_nombre else None
-                if not empresa and servicio_nombre:
-                    errores.append(f'Fila {row_idx}: El servicio "{servicio_nombre}" no existe.')
+            if compania_act:
+                servicio = ServicioModel.objects.filter(
+                    nombre__iexact=compania_act,
+                    estado='1',
+                    fecha_elimina__isnull=True,
+                ).first()
+                if not servicio:
+                    errores.append(f'Fila {row_idx}: La compañía actual "{compania_act}" no existe.')
                     continue
-                if contratista_nombre:
-                    servicio = ServicioModel.objects.filter(
-                        empresa=empresa, nombre__iexact=contratista_nombre, estado='1'
-                    ).first() if empresa else None
-                    if not servicio:
-                        errores.append(
-                            f'Fila {row_idx}: El contratista "{contratista_nombre}" no existe'
-                            + (f' para el servicio "{servicio_nombre}".' if servicio_nombre else '.')
-                        )
-                        continue
-                    servicio_id = servicio.id
-                elif empresa:
-                    primer_servicio = ServicioModel.objects.filter(empresa=empresa, estado='1').first()
-                    if primer_servicio:
-                        servicio_id = primer_servicio.id
+                servicio_id = servicio.id
 
             payload = {
                 'servicio_id': servicio_id,
@@ -891,6 +925,21 @@ class ClienteViewSet(viewsets.ModelViewSet):
                 cliente = serializer.save()
                 cliente.creado_por_carga_masiva = True
                 cliente.save(update_fields=['creado_por_carga_masiva'])
+
+                producto_norm = ' '.join((producto or '').strip().lower().split())
+                if cups and producto_norm in productos_con_cups:
+                    FormularioCliente.objects.update_or_create(
+                        cliente=cliente,
+                        nombre_campo='CUPS',
+                        defaults={'respuesta_campo': cups, 'estado': '1'},
+                    )
+                if mantenimiento and mantenimiento in ('si', 'no'):
+                    FormularioCliente.objects.update_or_create(
+                        cliente=cliente,
+                        nombre_campo='Mantenimiento',
+                        defaults={'respuesta_campo': mantenimiento, 'estado': '1'},
+                    )
+
                 creados += 1
             else:
                 err_msg = '; '.join(

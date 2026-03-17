@@ -710,8 +710,8 @@ class ClienteActualizarProductoSerializer(serializers.Serializer):
                     cerrador_id_val = int(str(item.get('respuesta_campo', '')).strip())
                 except (ValueError, TypeError):
                     cerrador_id_val = None
-        ce.vendedor_id = vendedor_id_val
         if es_admin:
+            ce.vendedor_id = vendedor_id_val
             ce.cerrador_id = cerrador_id_val
         ce.save()
         # Resto de respuestas -> FormularioCliente (cliente-level)
