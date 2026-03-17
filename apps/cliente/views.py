@@ -718,7 +718,9 @@ class ClienteViewSet(viewsets.ModelViewSet):
         Compañía actual (selector), Producto, CUPS (opcional si LUZ/GAS), Mantenimiento (opcional si/no).
         """
         from apps.core.choices import TIPO_IDENTIFICACION
+        from apps.formularios.models import Campo as CampoForm, CampoOpcion
         from apps.servicio.models import Servicio as ServicioModel
+        from django.db.models import Q
         from openpyxl.worksheet.datavalidation import DataValidation
 
         wb = Workbook()
@@ -757,6 +759,21 @@ class ClienteViewSet(viewsets.ModelViewSet):
             cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
             cell.border = thin_border
 
+        # Obtener productos para ejemplo (antes de crear hoja Opciones)
+        nombres_producto = ['producto', 'Productos', 'Tipo producto', 'tipo de producto']
+        q_producto = Q()
+        for n in nombres_producto:
+            q_producto |= Q(nombre__iexact=n)
+        campos_producto_ej = CampoForm.objects.filter(
+            fecha_elimina__isnull=True, tipo='select'
+        ).filter(q_producto).prefetch_related('opciones')
+        primer_producto = ''
+        for cp in campos_producto_ej:
+            op = cp.opciones.filter(activo=True, estado='1').order_by('orden', 'id').first()
+            if op:
+                primer_producto = (op.value or op.label or '').strip()
+                break
+
         # Fila de ejemplo
         ws.append([
             'Juan Pérez',
@@ -768,9 +785,9 @@ class ClienteViewSet(viewsets.ModelViewSet):
             'ejemplo@correo.com',
             'Empresa anterior S.L.',
             'Nombre compañía actual',
-            'Producto A',
+            primer_producto or '',
             '',
-            'si',
+            '',
         ])
 
         # Hoja Opciones con valores válidos para validación
@@ -785,6 +802,19 @@ class ClienteViewSet(viewsets.ModelViewSet):
         ws_opciones['C1'] = 'Mantenimiento'
         ws_opciones['C2'] = 'si'
         ws_opciones['C3'] = 'no'
+        ws_opciones['D1'] = 'Productos'
+        campos_producto = CampoForm.objects.filter(
+            fecha_elimina__isnull=True, tipo='select'
+        ).filter(q_producto).prefetch_related('opciones')
+        productos_vistos = {}
+        row_prod = 2
+        for cp in campos_producto:
+            for op in cp.opciones.filter(activo=True, estado='1').order_by('orden', 'id'):
+                v = (op.value or op.label or '').strip()
+                if v and v not in productos_vistos:
+                    productos_vistos[v] = True
+                    ws_opciones.cell(row=row_prod, column=4, value=v)
+                    row_prod += 1
 
         # Validación de datos: Tipo identificación (col B)
         tipo_opts = ','.join(v[0] for v in TIPO_IDENTIFICACION)
@@ -807,7 +837,18 @@ class ClienteViewSet(viewsets.ModelViewSet):
             dv_comp.add('I2:I1000')
             ws.add_data_validation(dv_comp)
 
-        # Validación: Mantenimiento (col L)
+        # Validación: Producto (col J) - referencia a hoja Opciones
+        if productos_vistos:
+            n_prod = row_prod
+            dv_prod = DataValidation(
+                type='list',
+                formula1=f"Opciones!$D$2:$D${n_prod}",
+                allow_blank=True,
+            )
+            dv_prod.add('J2:J1000')
+            ws.add_data_validation(dv_prod)
+
+        # Validación: Mantenimiento (col L) - opcional, no obligatorio
         dv_mant = DataValidation(type='list', formula1='"si,no"', allow_blank=True)
         dv_mant.add('L2:L1000')
         ws.add_data_validation(dv_mant)

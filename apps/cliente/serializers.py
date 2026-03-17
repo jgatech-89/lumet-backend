@@ -369,7 +369,10 @@ class ClienteCreateSerializer(serializers.Serializer):
             return ''
 
         def es_visible_si_cambio_titular(campo):
-            vs = (getattr(campo, 'visible_si', None) or '').lower().replace('_', ' ').strip()
+            vs = getattr(campo, 'visible_si', None)
+            if vs and isinstance(vs, dict) and vs.get('repetir_segun'):
+                return False
+            vs = (vs or '').lower().replace('_', ' ').strip()
             return 'cambio' in vs and 'titular' in vs
 
         def cambio_titular_marcado():
@@ -393,10 +396,29 @@ class ClienteCreateSerializer(serializers.Serializer):
                 continue
             if es_campo_vendedor(c.nombre):
                 continue
+            if norm(c.nombre) == 'mantenimiento':
+                continue
             campos_requeridos.add(c.nombre)
 
+        def _nombre_es_campo_repetido_valido(nombre_campo):
+            """Permite 'linea adicional (1)', 'linea adicional (2)' cuando existe campo 'linea adicional (x)' con repetir_segun."""
+            for c in campos:
+                vs = getattr(c, 'visible_si', None)
+                if not vs or not isinstance(vs, dict) or not vs.get('repetir_segun'):
+                    continue
+                base = (c.nombre or '').strip()
+                if not base or ('(x)' not in base.lower() and '($)' not in base.lower()):
+                    continue
+                pat = '^' + re.sub(r'\([x$]\)', r'(\\d+)', re.escape(base), flags=re.I) + r'$'
+                if re.match(pat, (nombre_campo or ''), re.I):
+                    return True
+            return False
+
         for nombre_campo in respuestas_por_campo:
-            if nombre_campo not in nombres_campos and not es_extra_permitido(nombre_campo) and not es_campo_modelo_cliente(nombre_campo):
+            if (nombre_campo not in nombres_campos
+                    and not es_extra_permitido(nombre_campo)
+                    and not es_campo_modelo_cliente(nombre_campo)
+                    and not _nombre_es_campo_repetido_valido(nombre_campo)):
                 raise serializers.ValidationError({
                     'respuestas': f'El campo "{nombre_campo}" no está configurado para este servicio.'
                 })
@@ -519,8 +541,24 @@ class ClienteAgregarProductoSerializer(serializers.Serializer):
         es_extra_permitido = lambda n: any(norm(n) == norm(p) for p in NOMBRES_EXTRA_PERMITIDOS)
 
         def es_visible_si_cambio_titular(campo):
-            vs = (getattr(campo, 'visible_si', None) or '').lower().replace('_', ' ').strip()
+            vs = getattr(campo, 'visible_si', None)
+            if vs and isinstance(vs, dict) and vs.get('repetir_segun'):
+                return False
+            vs = (vs or '').lower().replace('_', ' ').strip()
             return 'cambio' in vs and 'titular' in vs
+
+        def _nombre_es_campo_repetido_valido(nombre_campo):
+            for c in campos:
+                vs = getattr(c, 'visible_si', None)
+                if not vs or not isinstance(vs, dict) or not vs.get('repetir_segun'):
+                    continue
+                base = (c.nombre or '').strip()
+                if not base or ('(x)' not in base.lower() and '($)' not in base.lower()):
+                    continue
+                pat = '^' + re.sub(r'\([x$]\)', r'(\\d+)', re.escape(base), flags=re.I) + r'$'
+                if re.match(pat, (nombre_campo or ''), re.I):
+                    return True
+            return False
 
         def cambio_titular_marcado():
             for n in NOMBRES_CAMBIO_TITULAR:
@@ -538,6 +576,8 @@ class ClienteAgregarProductoSerializer(serializers.Serializer):
                 continue
             if es_visible_si_cambio_titular(c) and not ct_marcado:
                 continue
+            if norm(c.nombre) == 'mantenimiento':
+                continue
             campos_requeridos.add(c.nombre)
 
         def get_valor_campo(nombre_requerido):
@@ -554,7 +594,9 @@ class ClienteAgregarProductoSerializer(serializers.Serializer):
             return ''
 
         for nombre_campo in respuestas_por_campo:
-            if nombre_campo not in nombres_campos and not es_extra_permitido(nombre_campo):
+            if (nombre_campo not in nombres_campos
+                    and not es_extra_permitido(nombre_campo)
+                    and not _nombre_es_campo_repetido_valido(nombre_campo)):
                 raise serializers.ValidationError({
                     'respuestas': f'El campo "{nombre_campo}" no está configurado para este servicio.'
                 })
