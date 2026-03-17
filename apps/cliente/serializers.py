@@ -396,7 +396,11 @@ class ClienteCreateSerializer(serializers.Serializer):
                 continue
             if es_campo_vendedor(c.nombre):
                 continue
-            if norm(c.nombre) == 'mantenimiento':
+            if 'mantenimiento' in norm(c.nombre) or 'mantenimiento_luz' in norm(c.nombre):
+                continue
+            if 'cups' in norm(c.nombre):
+                continue
+            if 'fibra' in norm(c.nombre):
                 continue
             campos_requeridos.add(c.nombre)
 
@@ -423,12 +427,14 @@ class ClienteCreateSerializer(serializers.Serializer):
                     'respuestas': f'El campo "{nombre_campo}" no está configurado para este servicio.'
                 })
 
-        for nombre in campos_requeridos:
-            valor = get_valor_campo(nombre)
-            if not valor or not str(valor).strip():
-                raise serializers.ValidationError({
-                    'respuestas': f'El campo "{nombre}" es obligatorio.'
-                })
+        # En importación Excel no validamos campos obligatorios del formulario (respuestas viene vacío)
+        if not self.context.get('importar_excel'):
+            for nombre in campos_requeridos:
+                valor = get_valor_campo(nombre)
+                if not valor or not str(valor).strip():
+                    raise serializers.ValidationError({
+                        'respuestas': f'El campo "{nombre}" es obligatorio.'
+                    })
 
         return attrs
 
@@ -576,7 +582,7 @@ class ClienteAgregarProductoSerializer(serializers.Serializer):
                 continue
             if es_visible_si_cambio_titular(c) and not ct_marcado:
                 continue
-            if norm(c.nombre) == 'mantenimiento':
+            if 'mantenimiento' in norm(c.nombre) or 'cups' in norm(c.nombre) or 'fibra' in norm(c.nombre):
                 continue
             campos_requeridos.add(c.nombre)
 

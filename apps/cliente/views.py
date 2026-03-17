@@ -740,6 +740,7 @@ class ClienteViewSet(viewsets.ModelViewSet):
             'Producto',
             'CUPS',
             'Mantenimiento',
+            'Fibra',
         ]
         ws.append(headers)
 
@@ -774,6 +775,26 @@ class ClienteViewSet(viewsets.ModelViewSet):
                 primer_producto = (op.value or op.label or '').strip()
                 break
 
+        # Obtener opciones Fibra (campo select en Configuración)
+        nombres_fibra = ['fibra', 'Fibra']
+        q_fibra = Q()
+        for n in nombres_fibra:
+            q_fibra |= Q(nombre__iexact=n)
+        campos_fibra = CampoForm.objects.filter(
+            fecha_elimina__isnull=True, tipo='select'
+        ).filter(q_fibra).prefetch_related('opciones')
+        primer_fibra = ''
+        fibra_opciones_lista = []
+        nombre_campo_fibra = ''
+        for cf in campos_fibra:
+            nombre_campo_fibra = cf.nombre
+            for op in cf.opciones.filter(activo=True, estado='1').order_by('orden', 'id'):
+                v = (op.value or op.label or '').strip()
+                if v and v not in fibra_opciones_lista:
+                    fibra_opciones_lista.append(v)
+                    if not primer_fibra:
+                        primer_fibra = v
+
         # Fila de ejemplo
         ws.append([
             'Juan Pérez',
@@ -788,6 +809,7 @@ class ClienteViewSet(viewsets.ModelViewSet):
             primer_producto or '',
             '',
             '',
+            primer_fibra or '',
         ])
 
         # Hoja Opciones con valores válidos para validación
@@ -815,6 +837,13 @@ class ClienteViewSet(viewsets.ModelViewSet):
                     productos_vistos[v] = True
                     ws_opciones.cell(row=row_prod, column=4, value=v)
                     row_prod += 1
+
+        # Fibra (col E en Opciones) - opciones del campo select Fibra
+        ws_opciones['E1'] = 'Fibra'
+        row_fibra = 2
+        for v in fibra_opciones_lista:
+            ws_opciones.cell(row=row_fibra, column=5, value=v)
+            row_fibra += 1
 
         # Validación de datos: Tipo identificación (col B)
         tipo_opts = ','.join(v[0] for v in TIPO_IDENTIFICACION)
@@ -853,7 +882,18 @@ class ClienteViewSet(viewsets.ModelViewSet):
         dv_mant.add('L2:L1000')
         ws.add_data_validation(dv_mant)
 
-        column_widths = [22, 18, 18, 28, 28, 14, 24, 22, 28, 18, 20, 14]
+        # Validación: Fibra (col M) - opcional, opciones del campo en Configuración
+        if fibra_opciones_lista:
+            n_fibra = row_fibra
+            dv_fibra = DataValidation(
+                type='list',
+                formula1=f"Opciones!$E$2:$E${n_fibra}",
+                allow_blank=True,
+            )
+            dv_fibra.add('M2:M1000')
+            ws.add_data_validation(dv_fibra)
+
+        column_widths = [22, 18, 18, 28, 28, 14, 24, 22, 28, 18, 20, 14, 14]
         for col, width in enumerate(column_widths, start=1):
             ws.column_dimensions[ws.cell(row=1, column=col).column_letter].width = width
 
@@ -881,6 +921,8 @@ class ClienteViewSet(viewsets.ModelViewSet):
         """
         from apps.core.choices import TIPO_IDENTIFICACION
         from apps.servicio.models import Servicio as ServicioModel
+        from apps.formularios.models import Campo as CampoForm
+        from django.db.models import Q
 
         archivo = request.FILES.get('archivo') or request.FILES.get('file')
 
@@ -900,9 +942,26 @@ class ClienteViewSet(viewsets.ModelViewSet):
             )
 
         # Columnas: 0=Nombre, 1=Tipo id, 2=Nº id, 3=Cuenta bancaria, 4=Dirección, 5=Teléfono,
-        # 6=Correo, 7=Compañía anterior, 8=Compañía actual, 9=Producto, 10=CUPS, 11=Mantenimiento
+        # 6=Correo, 7=Compañía anterior, 8=Compañía actual, 9=Producto, 10=CUPS, 11=Mantenimiento, 12=Fibra
         tipos_validos = {v[0] for v in TIPO_IDENTIFICACION}
         productos_con_cups = {'luz', 'gas', 'luz gas'}
+
+        # Opciones válidas Fibra (del campo select en Configuración)
+        nombres_fibra = ['fibra', 'Fibra']
+        q_fibra = Q()
+        for n in nombres_fibra:
+            q_fibra |= Q(nombre__iexact=n)
+        campo_fibra = CampoForm.objects.filter(
+            fecha_elimina__isnull=True, tipo='select'
+        ).filter(q_fibra).prefetch_related('opciones').first()
+        fibra_opciones_validas = set()
+        nombre_campo_fibra = ''
+        if campo_fibra:
+            nombre_campo_fibra = campo_fibra.nombre
+            for op in campo_fibra.opciones.filter(activo=True, estado='1'):
+                v = (op.value or op.label or '').strip()
+                if v:
+                    fibra_opciones_validas.add(v)
 
         creados = 0
         errores = []
@@ -933,6 +992,7 @@ class ClienteViewSet(viewsets.ModelViewSet):
             producto = (row[9] or '').strip() if len(row) > 9 else ''
             cups = (row[10] or '').strip() if len(row) > 10 else ''
             mantenimiento = (row[11] or '').strip().lower() if len(row) > 11 else ''
+            fibra = (row[12] or '').strip() if len(row) > 12 else ''
 
             servicio_id = None
             if compania_act:
@@ -961,7 +1021,7 @@ class ClienteViewSet(viewsets.ModelViewSet):
                 'respuestas': [],
             }
 
-            serializer = ClienteCreateSerializer(data=payload, context={'request': request})
+            serializer = ClienteCreateSerializer(data=payload, context={'request': request, 'importar_excel': True})
             if serializer.is_valid():
                 cliente = serializer.save()
                 cliente.creado_por_carga_masiva = True
@@ -979,6 +1039,12 @@ class ClienteViewSet(viewsets.ModelViewSet):
                         cliente=cliente,
                         nombre_campo='Mantenimiento',
                         defaults={'respuesta_campo': mantenimiento, 'estado': '1'},
+                    )
+                if fibra and nombre_campo_fibra and fibra in fibra_opciones_validas:
+                    FormularioCliente.objects.update_or_create(
+                        cliente=cliente,
+                        nombre_campo=nombre_campo_fibra,
+                        defaults={'respuesta_campo': fibra, 'estado': '1'},
                     )
 
                 creados += 1
