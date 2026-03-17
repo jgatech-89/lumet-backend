@@ -4,13 +4,10 @@ Choices centralizados del sistema.
 """
 
 TIPO_IDENTIFICACION = [
-    ('CC', 'Cédula de ciudadanía'),
-    ('CE', 'Cédula de extranjería'),
-    ('DNI', 'DNI'),
-    ('NIT', 'NIT'),
-    ('PAS', 'Pasaporte'),
-    ('PPT', 'Permiso provisional de trabajo'),
-    ('OTRO', 'Otro'),
+    ('NIE', 'NIE - NÚMERO DE IDENTIFICACIÓN EXTRANJERO'),
+    ('PAS', 'PAS - PASAPORTE'),
+    ('DNI', 'DNI - DOCUMENTO NACIONAL DE IDENTIDAD'),
+    ('CIF', 'CIF - CÓDIGO DE IDENTIFICACIÓN FISCAL'),
 ]
 
 PERFIL = [
@@ -54,7 +51,7 @@ SECCIONES_FORMULARIO = [
     ('cliente', 'Cliente'),
     ('datos_base', 'Datos base'),
     ('campos_formulario', 'Campos del formulario'),
-    ('vendedor', 'Vendedor'),
+    ('vendedor', 'Comercial'),
 ]
 
 # Estado de venta: preparado para manejarse por select (configurable).

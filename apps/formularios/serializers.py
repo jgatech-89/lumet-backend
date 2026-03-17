@@ -31,15 +31,15 @@ class CampoReadSerializer(serializers.ModelSerializer):
     opciones = CampoOpcionNestedSerializer(many=True, read_only=True)
 
     def get_servicio_nombre(self, obj):
-        # En UI se muestra en la columna "Contratista"
+        # En UI se muestra en la columna "Compañía actual"
         # - Si hay servicio concreto: su nombre.
-        # - Si hay empresa pero no servicio: todos los contratistas de ese servicio.
-        # - Si tampoco hay empresa (aplica global): todos los servicios y contratistas.
+        # - Si hay empresa pero no servicio: todas las compañías de ese servicio.
+        # - Si tampoco hay empresa (aplica global): todos los servicios y compañías.
         if obj.servicio:
             return obj.servicio.nombre
         if obj.empresa:
-            return 'Todos los contratistas'
-        return 'Todos los servicios y contratistas'
+            return 'Todas las compañías'
+        return 'Todos los servicios y compañías'
 
     class Meta:
         model = Campo

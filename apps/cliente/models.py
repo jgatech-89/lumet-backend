@@ -18,8 +18,10 @@ class Cliente(models.Model):
     telefono = models.CharField(max_length=20, blank=True)
     correo_electronico_o_carta = models.CharField(max_length=254, blank=True, default='')
     direccion = models.CharField(max_length=500, blank=True, default='')
-    cups = models.CharField(max_length=100, blank=True, default='')
     cuenta_bancaria = models.CharField(max_length=100, blank=True, default='')
+    documento_dni = models.FileField(upload_to='clientes/documentos/%Y/%m/', blank=True, null=True)
+    documento_factura = models.FileField(upload_to='clientes/documentos/%Y/%m/', blank=True, null=True)
+    creado_por_carga_masiva = models.BooleanField(default=False)
     compania_anterior = models.CharField(max_length=255, blank=True, default='')
     compania_actual = models.CharField(max_length=255, blank=True, default='')
     estado = models.CharField(max_length=20, choices=ESTADO, default='1')
@@ -151,7 +153,15 @@ class ClienteEmpresa(models.Model):
         null=True,
         blank=True,
         related_name='cliente_empresas',
-        verbose_name='Vendedor del producto',
+        verbose_name='Comercial',
+    )
+    cerrador = models.ForeignKey(
+        'persona.Vendedor',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='cliente_empresas_cerrador',
+        verbose_name='Cerrador',
     )
     empresa = models.ForeignKey(
         Empresa,

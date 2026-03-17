@@ -3,6 +3,7 @@ URL configuration for lumet_backend project.
 Solo incluye las URLs de cada app; las rutas se definen en cada app.
 """
 from django.conf import settings
+from django.conf.urls.static import static
 from django.contrib import admin
 from django.http import HttpResponseForbidden
 from django.urls import path, include
@@ -25,6 +26,8 @@ urlpatterns = [
 # Admin solo en desarrollo (no accesible en producción)
 if settings.DEBUG:
     urlpatterns.insert(0, path('admin/', admin.site.urls))
+    # Servir archivos media en desarrollo
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 else:
 
     def admin_forbidden(request):
