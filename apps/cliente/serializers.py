@@ -43,14 +43,16 @@ class ClienteEmpresaSerializer(serializers.ModelSerializer):
     servicio_nombre = serializers.CharField(source='servicio.nombre', read_only=True)
     vendedor_nombre = serializers.SerializerMethodField()
     estado_venta = serializers.SerializerMethodField()
-    vendedor_nombre = serializers.SerializerMethodField()
 
     class Meta:
         model = ClienteEmpresa
         fields = ['id', 'tipo_cliente', 'empresa', 'empresa_nombre', 'servicio', 'servicio_nombre', 'producto', 'vendedor', 'vendedor_nombre', 'estado_venta', 'fecha_registra']
 
     def get_vendedor_nombre(self, obj):
-        return (obj.vendedor.nombre_completo if obj.vendedor else None) if obj.vendedor_id else None
+        """Vendedor del producto: prioridad ClienteEmpresa.vendedor (relación directa), luego fallbacks por historial/legacy."""
+        if obj.vendedor_id and obj.vendedor:
+            return getattr(obj.vendedor, 'nombre_completo', None) or str(obj.vendedor)
+        return _vendedor_nombre_por_cliente_empresa(obj) or ''
 
     def get_estado_venta(self, obj):
         h = HistorialEstadoVenta.objects.filter(
@@ -62,9 +64,6 @@ class ClienteEmpresaSerializer(serializers.ModelSerializer):
             cliente=obj.cliente, cliente_empresa__isnull=True, activo=True, estado_registro='1'
         ).first()
         return h_legacy.estado if h_legacy else 'venta_iniciada'
-
-    def get_vendedor_nombre(self, obj):
-        return _vendedor_nombre_por_cliente_empresa(obj) or ''
 
 
 class ClienteSerializer(serializers.ModelSerializer):
@@ -254,9 +253,18 @@ class ClienteCreateSerializer(serializers.Serializer):
         NOMBRES_PRODUCTO_CAMPO = ['producto', 'Producto', 'Productos', 'Tipo producto', 'tipo de producto', 'Tipo de Producto']
         NOMBRES_CAMBIO_TITULAR = ['cambio de titular', 'Cambio de titular', 'cambio titular', 'Cambio titular']
         NOMBRES_EXTRA_PERMITIDOS = ['vendedor', 'Vendedor']
+        # CUPS es campo del modelo Cliente, no del formulario dinámico; no se valida como respuesta
+        NOMBRES_CAMPO_MODELO_CLIENTE = ['cup', 'cups']
+        # Tipo cliente puede no venir en la importación Excel; no exigir como obligatorio en create
+        NOMBRES_TIPO_CLIENTE_CAMPO = ['tipo_cliente', 'tipo de cliente', 'Tipo de cliente', 'Tipo Cliente', 'tipo cliente']
+        # Vendedor puede no venir en la importación Excel; no exigir como obligatorio en create
+        NOMBRES_VENDEDOR_CAMPO = ['vendedor', 'Vendedor']
         norm = lambda s: (s or '').lower().replace(' ', '_')
         es_campo_producto = lambda n: any(norm(n) == norm(p) for p in NOMBRES_PRODUCTO_CAMPO)
         es_extra_permitido = lambda n: any(norm(n) == norm(p) for p in NOMBRES_EXTRA_PERMITIDOS)
+        es_campo_modelo_cliente = lambda n: norm(n) in NOMBRES_CAMPO_MODELO_CLIENTE
+        es_campo_tipo_cliente = lambda n: any(norm(n) == norm(p) for p in NOMBRES_TIPO_CLIENTE_CAMPO)
+        es_campo_vendedor = lambda n: any(norm(n) == norm(p) for p in NOMBRES_VENDEDOR_CAMPO)
 
         def get_valor_campo(nombre_requerido):
             """Obtiene el valor con búsqueda flexible (ej: Vendedor vs vendedor)."""
@@ -290,10 +298,16 @@ class ClienteCreateSerializer(serializers.Serializer):
                 continue
             if es_visible_si_cambio_titular(c) and not ct_marcado:
                 continue
+            if es_campo_modelo_cliente(c.nombre):
+                continue
+            if es_campo_tipo_cliente(c.nombre):
+                continue
+            if es_campo_vendedor(c.nombre):
+                continue
             campos_requeridos.add(c.nombre)
 
         for nombre_campo in respuestas_por_campo:
-            if nombre_campo not in nombres_campos and not es_extra_permitido(nombre_campo):
+            if nombre_campo not in nombres_campos and not es_extra_permitido(nombre_campo) and not es_campo_modelo_cliente(nombre_campo):
                 raise serializers.ValidationError({
                     'respuestas': f'El campo "{nombre_campo}" no está configurado para este servicio.'
                 })
@@ -566,7 +580,13 @@ class ClienteActualizarProductoSerializer(serializers.Serializer):
         if 'tipo_cliente' in self.validated_data:
             ce.tipo_cliente = (self.validated_data.get('tipo_cliente') or '').strip()
         if 'servicio_id' in self.validated_data and self.validated_data['servicio_id'] is not None:
-            ce.servicio_id = self.validated_data['servicio_id']
+            servicio_id = self.validated_data['servicio_id']
+            try:
+                servicio = Servicio.objects.get(id=servicio_id, estado='1')
+                ce.servicio_id = servicio.id
+                ce.empresa_id = servicio.empresa_id
+            except Servicio.DoesNotExist:
+                pass
         if 'producto' in self.validated_data:
             ce.producto = (self.validated_data.get('producto') or '').strip()
         # Vendedor del producto desde respuestas (guardar en ClienteEmpresa.vendedor_id)

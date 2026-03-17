@@ -110,6 +110,7 @@ def _productos_para_pdf(cliente):
                 'servicio_nombre': (ce.servicio.nombre if ce.servicio else '-'),
                 'producto': ce.producto or '-',
                 'tipo_cliente': ce.tipo_cliente or '-',
+                'vendedor': _vendedor_por_producto(cliente, ce),
             }
             for ce in empresas
         ]
@@ -118,7 +119,8 @@ def _productos_para_pdf(cliente):
     empresa_nombre = servicio.empresa.nombre if servicio and servicio.empresa_id else '-'
     servicio_nombre = servicio.nombre if servicio else '-'
     producto = (cliente.producto or '').strip() or '-'
-    return [{'empresa_nombre': empresa_nombre, 'servicio_nombre': servicio_nombre, 'producto': producto, 'tipo_cliente': '-'}]
+    vendedor = _vendedor_nombre_cliente(cliente) or '-'
+    return [{'empresa_nombre': empresa_nombre, 'servicio_nombre': servicio_nombre, 'producto': producto, 'tipo_cliente': '-', 'vendedor': vendedor}]
 
 
 def _estado_venta_por_producto(cliente, cliente_empresa):
@@ -437,7 +439,6 @@ class ClienteViewSet(viewsets.ModelViewSet):
         )
         estado_venta_raw = _estado_venta_cliente(cliente)
         estado_venta = _formatear_estado_venta(estado_venta_raw) if estado_venta_raw else '-'
-        vendedor = _vendedor_nombre_cliente(cliente) or '-'
         fecha_generacion = timezone.now().strftime('%d/%m/%Y %H:%M')
 
         buffer = io.BytesIO()
@@ -582,10 +583,11 @@ class ClienteViewSet(viewsets.ModelViewSet):
             else:
                 elements.append(Paragraph('Sin respuestas de formulario registradas.', note_style))
 
-            # 4. DATOS DEL VENDEDOR
+            # 4. DATOS DEL VENDEDOR (vendedor por producto, como en Excel)
+            vendedor_producto = prod.get('vendedor') or '-'
             elements.append(Paragraph('4. DATOS DEL VENDEDOR', section_style))
             datos_vendedor = [
-                ['VENDEDOR ASIGNADO', vendedor],
+                ['VENDEDOR ASIGNADO', vendedor_producto],
             ]
             t_vend = Table(datos_vendedor, colWidths=[5 * cm, 10.5 * cm])
             t_vend.setStyle(TableStyle([
@@ -729,6 +731,8 @@ class ClienteViewSet(viewsets.ModelViewSet):
             'Correo electrónico o carta',
             'Compañía anterior',
             'Compañía actual',
+            'Servicio',
+            'Contratista',
             'Producto',
         ]
         ws.append(headers)
@@ -761,10 +765,12 @@ class ClienteViewSet(viewsets.ModelViewSet):
             'ejemplo@correo.com',
             'Empresa anterior S.L.',
             'Empresa actual S.A.',
+            'Nombre del servicio (empresa)',
+            'Nombre del contratista (servicio)',
             'Producto A',
         ])
 
-        column_widths = [22, 18, 20, 24, 24, 28, 14, 28, 22, 22, 18]
+        column_widths = [22, 18, 20, 24, 24, 28, 14, 28, 22, 22, 28, 28, 18]
         for col, width in enumerate(column_widths, start=1):
             ws.column_dimensions[ws.cell(row=1, column=col).column_letter].width = width
 
@@ -808,7 +814,10 @@ class ClienteViewSet(viewsets.ModelViewSet):
             )
 
         # Columnas: 0=Nombre, 1=Tipo id, 2=Nº id, 3=CUPS, 4=Cuenta bancaria, 5=Dirección,
-        # 6=Teléfono, 7=Correo electrónico o carta, 8=Compañía anterior, 9=Compañía actual, 10=Producto
+        # 6=Teléfono, 7=Correo, 8=Compañía anterior, 9=Compañía actual, 10=Servicio, 11=Contratista, 12=Producto
+        from apps.empresa.models import Empresa
+        from apps.servicio.models import Servicio as ServicioModel
+
         creados = 0
         errores = []
 
@@ -822,18 +831,51 @@ class ClienteViewSet(viewsets.ModelViewSet):
                 continue
 
             tipo_id = (row[1] or '').strip() if len(row) > 1 else ''
-            numero_id = (row[2] or '').strip() if len(row) > 2 else ''
+            numero_id = (row[2] or '') if len(row) > 2 else ''
             cups = (row[3] or '').strip() if len(row) > 3 else ''
             cuenta_bancaria = (row[4] or '').strip() if len(row) > 4 else ''
             direccion = (row[5] or '').strip() if len(row) > 5 else ''
-            telefono = (row[6] or '').strip() if len(row) > 6 else ''
+            telefono = (row[6] or '') if len(row) > 6 else ''
             correo_electronico_o_carta = (row[7] or '').strip() if len(row) > 7 else ''
             compania_ant = (row[8] or '').strip() if len(row) > 8 else ''
             compania_act = (row[9] or '').strip() if len(row) > 9 else ''
-            producto = (row[10] or '').strip() if len(row) > 10 else ''
+            # Plantilla nueva: columnas 10=Servicio, 11=Contratista, 12=Producto. Antigua: 10=Producto.
+            tiene_columnas_servicio_contratista = len(row) > 11
+            if tiene_columnas_servicio_contratista:
+                servicio_nombre = (row[10] or '').strip() if len(row) > 10 else ''
+                contratista_nombre = (row[11] or '').strip() if len(row) > 11 else ''
+                producto = (row[12] or '').strip() if len(row) > 12 else ''
+            else:
+                servicio_nombre = ''
+                contratista_nombre = ''
+                producto = (row[10] or '').strip() if len(row) > 10 else ''
+
+            servicio_id = None
+            if tiene_columnas_servicio_contratista and (servicio_nombre or contratista_nombre):
+                empresa = Empresa.objects.filter(
+                    nombre__iexact=servicio_nombre, estado='1'
+                ).first() if servicio_nombre else None
+                if not empresa and servicio_nombre:
+                    errores.append(f'Fila {row_idx}: El servicio "{servicio_nombre}" no existe.')
+                    continue
+                if contratista_nombre:
+                    servicio = ServicioModel.objects.filter(
+                        empresa=empresa, nombre__iexact=contratista_nombre, estado='1'
+                    ).first() if empresa else None
+                    if not servicio:
+                        errores.append(
+                            f'Fila {row_idx}: El contratista "{contratista_nombre}" no existe'
+                            + (f' para el servicio "{servicio_nombre}".' if servicio_nombre else '.')
+                        )
+                        continue
+                    servicio_id = servicio.id
+                elif empresa:
+                    primer_servicio = ServicioModel.objects.filter(empresa=empresa, estado='1').first()
+                    if primer_servicio:
+                        servicio_id = primer_servicio.id
 
             payload = {
-                'servicio_id': None,
+                'servicio_id': servicio_id,
                 'nombre': nombre,
                 'tipo_identificacion': tipo_id,
                 'numero_identificacion': numero_id,
