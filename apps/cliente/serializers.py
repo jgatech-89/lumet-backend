@@ -436,6 +436,20 @@ class ClienteCreateSerializer(serializers.Serializer):
                         'respuestas': f'El campo "{nombre}" es obligatorio.'
                     })
 
+        # Validar CUPS: si contiene "cups" o "cup" y tiene valor, mínimo 16 dígitos y 4 letras
+        for c in campos:
+            if 'cups' not in norm(c.nombre) and 'cup' not in norm(c.nombre):
+                continue
+            valor = get_valor_campo(c.nombre)
+            if not valor or not str(valor).strip():
+                continue
+            digitos = len(re.findall(r'\d', str(valor)))
+            letras = len(re.findall(r'[a-zA-Z]', str(valor)))
+            if digitos < 16 or letras < 4:
+                raise serializers.ValidationError({
+                    'respuestas': f'El campo "{c.nombre}" (CUPS) debe tener mínimo 16 dígitos y 4 letras.'
+                })
+
         return attrs
 
     def create(self, validated_data):
@@ -614,6 +628,20 @@ class ClienteAgregarProductoSerializer(serializers.Serializer):
                     'respuestas': f'El campo "{nombre}" es obligatorio.'
                 })
 
+        # Validar CUPS: si contiene "cups" o "cup" y tiene valor, mínimo 16 dígitos y 4 letras
+        for c in campos:
+            if 'cups' not in norm(c.nombre) and 'cup' not in norm(c.nombre):
+                continue
+            valor = get_valor_campo(c.nombre)
+            if not valor or not str(valor).strip():
+                continue
+            digitos = len(re.findall(r'\d', str(valor)))
+            letras = len(re.findall(r'[a-zA-Z]', str(valor)))
+            if digitos < 16 or letras < 4:
+                raise serializers.ValidationError({
+                    'respuestas': f'El campo "{c.nombre}" (CUPS) debe tener mínimo 16 dígitos y 4 letras.'
+                })
+
         return attrs
 
     def create(self, validated_data):
@@ -718,6 +746,20 @@ class ClienteActualizarProductoSerializer(serializers.Serializer):
         except ClienteEmpresa.DoesNotExist:
             raise serializers.ValidationError({'cliente_empresa_id': 'Producto no encontrado o no pertenece a este cliente.'})
         attrs['_ce'] = ce
+        norm = lambda s: (s or '').lower().replace(' ', '_')
+        for item in (attrs.get('respuestas') or []):
+            nombre = (item.get('nombre_campo') or '').strip()
+            if 'cups' not in norm(nombre) and 'cup' not in norm(nombre):
+                continue
+            valor = str(item.get('respuesta_campo', '')).strip()
+            if not valor:
+                continue
+            digitos = len(re.findall(r'\d', valor))
+            letras = len(re.findall(r'[a-zA-Z]', valor))
+            if digitos < 16 or letras < 4:
+                raise serializers.ValidationError({
+                    'respuestas': f'El campo "{nombre}" (CUPS) debe tener mínimo 16 dígitos y 4 letras.'
+                })
         return attrs
 
     def save(self, **kwargs):
