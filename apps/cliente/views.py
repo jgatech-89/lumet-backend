@@ -97,11 +97,10 @@ def _formatear_estado_venta_legible(valor):
 def _productos_para_pdf(cliente):
     """
     Devuelve una lista de diccionarios con la información de cada producto del cliente
-    para generar una página del PDF por cada uno. Si no hay ClienteEmpresa, se arma
-    un producto a partir de cliente.servicio_id y cliente.producto.
+    para generar una página del PDF por cada uno. Incluye respuestas del formulario
+    asociadas a ese ClienteEmpresa (por id de producto).
     """
     from apps.servicio.models import Servicio
-    # Usar prefetch (get_queryset ya incluye ClienteEmpresa con estado='1' y select_related)
     empresas = list(cliente.cliente_empresas.all())
     if empresas:
         return [
@@ -111,6 +110,10 @@ def _productos_para_pdf(cliente):
                 'producto': ce.producto or '-',
                 'tipo_cliente': ce.tipo_cliente or '-',
                 'vendedor': _vendedor_por_producto(cliente, ce),
+                'respuestas': list(
+                    FormularioCliente.objects.filter(cliente_empresa_id=ce.id, estado='1')
+                    .order_by('nombre_campo')
+                ),
             }
             for ce in empresas
         ]
@@ -120,7 +123,8 @@ def _productos_para_pdf(cliente):
     servicio_nombre = servicio.nombre if servicio else '-'
     producto = (cliente.producto or '').strip() or '-'
     vendedor = _vendedor_nombre_cliente(cliente) or '-'
-    return [{'empresa_nombre': empresa_nombre, 'servicio_nombre': servicio_nombre, 'producto': producto, 'tipo_cliente': '-', 'vendedor': vendedor}]
+    respuestas_legacy = list(cliente.respuestas_formulario.filter(cliente_empresa__isnull=True, estado='1').order_by('nombre_campo'))
+    return [{'empresa_nombre': empresa_nombre, 'servicio_nombre': servicio_nombre, 'producto': producto, 'tipo_cliente': '-', 'vendedor': vendedor, 'respuestas': respuestas_legacy}]
 
 
 def _estado_venta_por_producto(cliente, cliente_empresa):
@@ -304,7 +308,11 @@ class ClienteViewSet(viewsets.ModelViewSet):
                     Prefetch(
                         'historial_estados_venta',
                         queryset=HistorialEstadoVenta.objects.filter(activo=True).select_related('usuario_registra'),
-                    )
+                    ),
+                    Prefetch(
+                        'respuestas_formulario',
+                        queryset=FormularioCliente.objects.filter(estado='1').order_by('nombre_campo'),
+                    ),
                 )
                 .order_by('id'),
             ),
@@ -433,10 +441,6 @@ class ClienteViewSet(viewsets.ModelViewSet):
         """
         cliente = self.get_object()
         productos = _productos_para_pdf(cliente)
-        respuestas = sorted(
-            [r for r in cliente.respuestas_formulario.all() if r.estado == '1'],
-            key=lambda r: (r.nombre_campo or ''),
-        )
         estado_venta_raw = _estado_venta_cliente(cliente)
         estado_venta = _formatear_estado_venta(estado_venta_raw) if estado_venta_raw else '-'
         fecha_generacion = timezone.now().strftime('%d/%m/%Y %H:%M')
@@ -499,11 +503,11 @@ class ClienteViewSet(viewsets.ModelViewSet):
             textColor=color_pie,
         )
         elements = []
-
         norm_campo = lambda s: (s or '').lower().strip().replace(' ', '_')
-        respuestas_sin_vendedor = [r for r in respuestas if norm_campo(r.nombre_campo) != 'vendedor']
 
         for idx, prod in enumerate(productos):
+            respuestas_producto = prod.get('respuestas') or []
+            respuestas_sin_vendedor = [r for r in respuestas_producto if norm_campo(r.nombre_campo) != 'vendedor']
             if idx > 0:
                 elements.append(PageBreak())
 
@@ -1027,22 +1031,26 @@ class ClienteViewSet(viewsets.ModelViewSet):
                 cliente.creado_por_carga_masiva = True
                 cliente.save(update_fields=['creado_por_carga_masiva'])
 
+                ce = cliente.cliente_empresas.filter(estado='1').order_by('id').first()
                 producto_norm = ' '.join((producto or '').strip().lower().split())
-                if cups and producto_norm in productos_con_cups:
+                if cups and producto_norm in productos_con_cups and ce:
                     FormularioCliente.objects.update_or_create(
                         cliente=cliente,
+                        cliente_empresa=ce,
                         nombre_campo='CUPS',
                         defaults={'respuesta_campo': cups, 'estado': '1'},
                     )
-                if mantenimiento and mantenimiento in ('si', 'no'):
+                if mantenimiento and mantenimiento in ('si', 'no') and ce:
                     FormularioCliente.objects.update_or_create(
                         cliente=cliente,
+                        cliente_empresa=ce,
                         nombre_campo='Mantenimiento',
                         defaults={'respuesta_campo': mantenimiento, 'estado': '1'},
                     )
-                if fibra and nombre_campo_fibra and fibra in fibra_opciones_validas:
+                if fibra and nombre_campo_fibra and fibra in fibra_opciones_validas and ce:
                     FormularioCliente.objects.update_or_create(
                         cliente=cliente,
+                        cliente_empresa=ce,
                         nombre_campo=nombre_campo_fibra,
                         defaults={'respuesta_campo': fibra, 'estado': '1'},
                     )

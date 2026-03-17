@@ -66,10 +66,11 @@ class ClienteEmpresaSerializer(serializers.ModelSerializer):
     vendedor_nombre = serializers.SerializerMethodField()
     cerrador_nombre = serializers.SerializerMethodField()
     estado_venta = serializers.SerializerMethodField()
+    respuestas = serializers.SerializerMethodField()
 
     class Meta:
         model = ClienteEmpresa
-        fields = ['id', 'tipo_cliente', 'empresa', 'empresa_nombre', 'servicio', 'servicio_nombre', 'producto', 'vendedor', 'vendedor_nombre', 'cerrador', 'cerrador_nombre', 'estado_venta', 'fecha_registra']
+        fields = ['id', 'tipo_cliente', 'empresa', 'empresa_nombre', 'servicio', 'servicio_nombre', 'producto', 'vendedor', 'vendedor_nombre', 'cerrador', 'cerrador_nombre', 'estado_venta', 'fecha_registra', 'respuestas']
 
     def get_cerrador_nombre(self, obj):
         if obj.cerrador_id and obj.cerrador:
@@ -92,6 +93,20 @@ class ClienteEmpresaSerializer(serializers.ModelSerializer):
             cliente=obj.cliente, cliente_empresa__isnull=True, activo=True, estado_registro='1'
         ).first()
         return h_legacy.estado if h_legacy else 'venta_iniciada'
+
+    def get_respuestas(self, obj):
+        """
+        Datos adicionales (Información adicional): solo respuestas de la tabla FormularioCliente
+        filtradas por cliente_empresa_id = este producto. No se mezclan con otros productos.
+        """
+        return list(
+            FormularioCliente.objects.filter(
+                cliente_empresa_id=obj.id,
+                estado='1',
+            )
+            .order_by('nombre_campo')
+            .values('nombre_campo', 'respuesta_campo')
+        )
 
 
 class ClienteSerializer(serializers.ModelSerializer):
@@ -226,7 +241,8 @@ class ClienteUpdateSerializer(serializers.Serializer):
                 fc, created = FormularioCliente.objects.get_or_create(
                     cliente=instance,
                     nombre_campo=nombre_campo,
-                    defaults={'respuesta_campo': respuesta_campo, 'usuario_registra': user}
+                    cliente_empresa=None,
+                    defaults={'respuesta_campo': respuesta_campo, 'usuario_registra': user},
                 )
                 if not created and fc.respuesta_campo != respuesta_campo:
                     fc.respuesta_campo = respuesta_campo
@@ -469,30 +485,17 @@ class ClienteCreateSerializer(serializers.Serializer):
         )
 
         NOMBRES_ESTADO_VENTA = ['estado_venta', 'Estado de venta', 'Estado venta', 'estado venta']
+        NOMBRES_TIPO_CLIENTE = ['tipo_cliente', 'Tipo de cliente', 'Tipo Cliente', 'tipo cliente']
         norm = lambda s: (s or '').lower().replace(' ', '_')
         estado_inicial = 'venta_iniciada'
-
-        for item in respuestas:
-            nombre_campo = item.get('nombre_campo', '')
-            respuesta_campo = item.get('respuesta_campo', '')
-            if any(norm(nombre_campo) == norm(n) for n in NOMBRES_ESTADO_VENTA):
-                estado_inicial = (respuesta_campo or '').strip() or estado_inicial or 'venta_iniciada'
-            else:
-                FormularioCliente.objects.create(
-                    cliente=cliente,
-                    nombre_campo=nombre_campo,
-                    respuesta_campo=str(respuesta_campo),
-                    usuario_registra=user
-                )
-
-        # Crear ClienteEmpresa primero para asociar el estado de venta al producto
-        NOMBRES_TIPO_CLIENTE = ['tipo_cliente', 'Tipo de cliente', 'Tipo Cliente', 'tipo cliente']
         tipo_cliente_val = ''
         vendedor_id_val = None
         cerrador_id_val = None
         for item in respuestas:
             nombre = (item.get('nombre_campo') or '').strip()
-            if any(norm(nombre) == norm(n) for n in NOMBRES_TIPO_CLIENTE):
+            if any(norm(nombre) == norm(n) for n in NOMBRES_ESTADO_VENTA):
+                estado_inicial = (item.get('respuesta_campo') or '').strip() or estado_inicial or 'venta_iniciada'
+            elif any(norm(nombre) == norm(n) for n in NOMBRES_TIPO_CLIENTE):
                 tipo_cliente_val = str(item.get('respuesta_campo', '')).strip()
             elif ('vendedor' in norm(nombre) or 'comercial' in norm(nombre)) and 'cerrador' not in norm(nombre):
                 try:
@@ -504,6 +507,7 @@ class ClienteCreateSerializer(serializers.Serializer):
                     cerrador_id_val = int(str(item.get('respuesta_campo', '')).strip())
                 except (ValueError, TypeError):
                     pass
+
         servicio = Servicio.objects.filter(id=cliente.servicio_id).first()
         empresa_id = servicio.empresa_id if servicio else None
         ce = ClienteEmpresa.objects.create(
@@ -525,6 +529,20 @@ class ClienteCreateSerializer(serializers.Serializer):
             activo=True,
             usuario_registra=user,
         )
+
+        for item in respuestas:
+            nombre_campo = item.get('nombre_campo', '')
+            respuesta_campo = item.get('respuesta_campo', '')
+            if any(norm(nombre_campo) == norm(n) for n in NOMBRES_ESTADO_VENTA):
+                continue
+            FormularioCliente.objects.create(
+                cliente=cliente,
+                cliente_empresa=ce,
+                nombre_campo=nombre_campo,
+                respuesta_campo=str(respuesta_campo),
+                usuario_registra=user,
+            )
+
         return cliente
 
 
@@ -610,15 +628,16 @@ class ClienteAgregarProductoSerializer(serializers.Serializer):
             campos_requeridos.add(c.nombre)
 
         def get_valor_campo(nombre_requerido):
-            """Obtiene el valor con búsqueda flexible (ej: Vendedor vs vendedor)."""
+            """Obtiene el valor con búsqueda flexible (ej: Vendedor vs vendedor, Comercial = Vendedor)."""
             if nombre_requerido in respuestas_por_campo:
                 return respuestas_por_campo[nombre_requerido]
             for k, v in respuestas_por_campo.items():
                 if norm(k) == norm(nombre_requerido):
                     return v
-            if 'vendedor' in norm(nombre_requerido):
+            # Campo vendedor/comercial: el formulario puede llamarse "Vendedor" o "Comercial"
+            if 'vendedor' in norm(nombre_requerido) or 'comercial' in norm(nombre_requerido):
                 for k, v in respuestas_por_campo.items():
-                    if 'vendedor' in norm(k):
+                    if 'vendedor' in norm(k) or 'comercial' in norm(k):
                         return v
             return ''
 
@@ -713,9 +732,9 @@ class ClienteAgregarProductoSerializer(serializers.Serializer):
                 pass  # ya manejado arriba con cliente_empresa
             else:
                 fc, created = FormularioCliente.objects.get_or_create(
-                    cliente=cliente,
+                    cliente_empresa=ce,
                     nombre_campo=nombre_campo,
-                    defaults={'respuesta_campo': respuesta_campo, 'usuario_registra': user}
+                    defaults={'cliente': cliente, 'respuesta_campo': respuesta_campo, 'usuario_registra': user},
                 )
                 if not created and fc.respuesta_campo != respuesta_campo:
                     fc.respuesta_campo = respuesta_campo
@@ -813,16 +832,16 @@ class ClienteActualizarProductoSerializer(serializers.Serializer):
             ce.vendedor_id = vendedor_id_val
             ce.cerrador_id = cerrador_id_val
         ce.save()
-        # Resto de respuestas -> FormularioCliente (cliente-level)
+        # Resto de respuestas -> FormularioCliente asociadas a ESTE producto (cliente_empresa)
         for item in respuestas:
             nombre_campo = item.get('nombre_campo', '')
             respuesta_campo = str(item.get('respuesta_campo', ''))
             if not nombre_campo or ('vendedor' in norm(nombre_campo) or 'comercial' in norm(nombre_campo)) and 'cerrador' not in norm(nombre_campo) or 'cerrador' in norm(nombre_campo):
                 continue
             fc, created = FormularioCliente.objects.get_or_create(
-                cliente=cliente,
+                cliente_empresa=ce,
                 nombre_campo=nombre_campo,
-                defaults={'respuesta_campo': respuesta_campo, 'usuario_registra': user},
+                defaults={'cliente': cliente, 'respuesta_campo': respuesta_campo, 'usuario_registra': user},
             )
             if not created and fc.respuesta_campo != respuesta_campo:
                 fc.respuesta_campo = respuesta_campo

@@ -2,6 +2,7 @@
 Modelos de la app cliente: Cliente, FormularioCliente (respuestas dinámicas), HistorialEstadoVenta y ClienteEmpresa.
 """
 from django.db import models
+from django.db.models import Q
 from django.utils import timezone
 
 from apps.persona.models import Persona
@@ -98,11 +99,19 @@ class HistorialEstadoVenta(models.Model):
 
 
 class FormularioCliente(models.Model):
-    """Respuesta dinámica de un campo del formulario, asociada a un cliente."""
+    """Respuesta dinámica de un campo del formulario, asociada a un cliente o a un producto (ClienteEmpresa)."""
     cliente = models.ForeignKey(
         Cliente,
         on_delete=models.CASCADE,
         related_name='respuestas_formulario',
+    )
+    cliente_empresa = models.ForeignKey(
+        'ClienteEmpresa',
+        on_delete=models.CASCADE,
+        related_name='respuestas_formulario',
+        null=True,
+        blank=True,
+        help_text='Si está definido, la respuesta pertenece a este producto; si no, es legacy a nivel cliente.',
     )
     nombre_campo = models.CharField(max_length=255)
     respuesta_campo = models.TextField(blank=True)
@@ -128,7 +137,18 @@ class FormularioCliente(models.Model):
         verbose_name = 'Respuesta formulario cliente'
         verbose_name_plural = 'Respuestas formulario cliente'
         ordering = ['cliente', 'nombre_campo']
-        unique_together = [['cliente', 'nombre_campo']]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['cliente', 'nombre_campo'],
+                condition=Q(cliente_empresa__isnull=True),
+                name='unique_formulario_cliente_legacy',
+            ),
+            models.UniqueConstraint(
+                fields=['cliente_empresa', 'nombre_campo'],
+                condition=Q(cliente_empresa__isnull=False),
+                name='unique_formulario_cliente_por_producto',
+            ),
+        ]
 
     def __str__(self):
         return f'{self.cliente} - {self.nombre_campo}'
