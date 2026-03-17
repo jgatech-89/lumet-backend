@@ -78,7 +78,7 @@ class ClienteEmpresaSerializer(serializers.ModelSerializer):
         return ''
 
     def get_vendedor_nombre(self, obj):
-        """Vendedor del producto: prioridad ClienteEmpresa.vendedor (relación directa), luego fallbacks por historial/legacy."""
+        """Vendedor del producto: prioridad ClienteEmpresa.vendedor, luego fallbacks por historial/legacy."""
         if obj.vendedor_id and obj.vendedor:
             return getattr(obj.vendedor, 'nombre_completo', None) or str(obj.vendedor)
         return _vendedor_nombre_por_cliente_empresa(obj) or ''
@@ -95,10 +95,112 @@ class ClienteEmpresaSerializer(serializers.ModelSerializer):
         return h_legacy.estado if h_legacy else 'venta_iniciada'
 
     def get_respuestas(self, obj):
-        """
-        Datos adicionales (Información adicional): solo respuestas de la tabla FormularioCliente
-        filtradas por cliente_empresa_id = este producto. No se mezclan con otros productos.
-        """
+        """Solo respuestas de FormularioCliente filtradas por cliente_empresa_id."""
+        return list(
+            FormularioCliente.objects.filter(
+                cliente_empresa_id=obj.id,
+                estado='1',
+            )
+            .order_by('nombre_campo')
+            .values('nombre_campo', 'respuesta_campo')
+        )
+
+
+class ClienteEmpresaSinRespuestasSerializer(serializers.ModelSerializer):
+    """
+    Igual que ClienteEmpresaSerializer pero sin respuestas.
+    Usado en el detalle del cliente al abrir desde la tabla principal (ojito), para no cargar respuestas hasta que se abra el detalle de un producto.
+    """
+    empresa_nombre = serializers.CharField(source='empresa.nombre', read_only=True)
+    servicio_nombre = serializers.CharField(source='servicio.nombre', read_only=True)
+    vendedor_nombre = serializers.SerializerMethodField()
+    cerrador_nombre = serializers.SerializerMethodField()
+    estado_venta = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ClienteEmpresa
+        fields = ['id', 'tipo_cliente', 'empresa', 'empresa_nombre', 'servicio', 'servicio_nombre', 'producto', 'vendedor', 'vendedor_nombre', 'cerrador', 'cerrador_nombre', 'estado_venta', 'fecha_registra']
+
+    def get_cerrador_nombre(self, obj):
+        if obj.cerrador_id and obj.cerrador:
+            return getattr(obj.cerrador, 'nombre_completo', None) or str(obj.cerrador)
+        return ''
+
+    def get_vendedor_nombre(self, obj):
+        if obj.vendedor_id and obj.vendedor:
+            return getattr(obj.vendedor, 'nombre_completo', None) or str(obj.vendedor)
+        return _vendedor_nombre_por_cliente_empresa(obj) or ''
+
+    def get_estado_venta(self, obj):
+        h = HistorialEstadoVenta.objects.filter(
+            cliente_empresa=obj, activo=True, estado_registro='1'
+        ).first()
+        if h:
+            return h.estado
+        h_legacy = HistorialEstadoVenta.objects.filter(
+            cliente=obj.cliente, cliente_empresa__isnull=True, activo=True, estado_registro='1'
+        ).first()
+        return h_legacy.estado if h_legacy else 'venta_iniciada'
+
+
+class ClienteMinimalSerializer(serializers.ModelSerializer):
+    """Solo campos necesarios para el modal de detalle de un producto (ojito)."""
+    vendedor_nombre = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Cliente
+        fields = ['id', 'nombre', 'vendedor_nombre']
+
+    def get_vendedor_nombre(self, obj):
+        from apps.persona.models import Vendedor
+        r = obj.respuestas_formulario.filter(nombre_campo__iexact='vendedor').first()
+        if not r or not r.respuesta_campo:
+            return None
+        try:
+            v = Vendedor.objects.filter(fecha_elimina__isnull=True).get(id=int(r.respuesta_campo))
+            return v.nombre_completo
+        except (ValueError, Vendedor.DoesNotExist):
+            return r.respuesta_campo
+
+
+class ClienteEmpresaDetalleModalSerializer(serializers.ModelSerializer):
+    """
+    Solo los campos que usa el modal de detalle del producto (ojito).
+    Omite id del producto, IDs de relaciones y fecha_registra.
+    """
+    empresa_nombre = serializers.CharField(source='empresa.nombre', read_only=True)
+    servicio_nombre = serializers.CharField(source='servicio.nombre', read_only=True)
+    vendedor_nombre = serializers.SerializerMethodField()
+    cerrador_nombre = serializers.SerializerMethodField()
+    estado_venta = serializers.SerializerMethodField()
+    respuestas = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ClienteEmpresa
+        fields = ['producto', 'empresa_nombre', 'servicio_nombre', 'tipo_cliente', 'estado_venta', 'vendedor_nombre', 'cerrador_nombre', 'respuestas']
+
+    def get_cerrador_nombre(self, obj):
+        if obj.cerrador_id and obj.cerrador:
+            return getattr(obj.cerrador, 'nombre_completo', None) or str(obj.cerrador)
+        return ''
+
+    def get_vendedor_nombre(self, obj):
+        if obj.vendedor_id and obj.vendedor:
+            return getattr(obj.vendedor, 'nombre_completo', None) or str(obj.vendedor)
+        return _vendedor_nombre_por_cliente_empresa(obj) or ''
+
+    def get_estado_venta(self, obj):
+        h = HistorialEstadoVenta.objects.filter(
+            cliente_empresa=obj, activo=True, estado_registro='1'
+        ).first()
+        if h:
+            return h.estado
+        h_legacy = HistorialEstadoVenta.objects.filter(
+            cliente=obj.cliente, cliente_empresa__isnull=True, activo=True, estado_registro='1'
+        ).first()
+        return h_legacy.estado if h_legacy else 'venta_iniciada'
+
+    def get_respuestas(self, obj):
         return list(
             FormularioCliente.objects.filter(
                 cliente_empresa_id=obj.id,
@@ -158,10 +260,10 @@ class ClienteSerializer(serializers.ModelSerializer):
 
 
 class ClienteDetalleSerializer(ClienteSerializer):
-    """Serializer para detalle con respuestas del formulario, servicio_empresa_id y cliente_empresas."""
+    """Serializer para detalle al abrir desde la tabla principal (ojito). cliente_empresas sin respuestas; las respuestas por producto se cargan al abrir el detalle de cada producto."""
     respuestas = FormularioClienteSerializer(source='respuestas_formulario', many=True, read_only=True)
     servicio_empresa_id = serializers.SerializerMethodField()
-    cliente_empresas = ClienteEmpresaSerializer(many=True, read_only=True)
+    cliente_empresas = ClienteEmpresaSinRespuestasSerializer(many=True, read_only=True)
 
     class Meta(ClienteSerializer.Meta):
         fields = ClienteSerializer.Meta.fields + ['respuestas', 'servicio_empresa_id', 'cliente_empresas']

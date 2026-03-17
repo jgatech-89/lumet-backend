@@ -23,6 +23,7 @@ from .serializers import (
     ClienteDetalleSerializer,
     ClienteUpdateSerializer,
     ClienteAgregarProductoSerializer,
+    ClienteEmpresaDetalleModalSerializer,
     ClienteActualizarProductoSerializer,
     _cambiar_estado_venta,
 )
@@ -97,8 +98,8 @@ def _formatear_estado_venta_legible(valor):
 def _productos_para_pdf(cliente):
     """
     Devuelve una lista de diccionarios con la información de cada producto del cliente
-    para generar una página del PDF por cada uno. Incluye respuestas del formulario
-    asociadas a ese ClienteEmpresa (por id de producto).
+    para generar una página del PDF por cada uno. Cada ítem incluye solo datos de ESE producto:
+    empresa/servicio/producto, vendedor, estado_venta y respuestas (filtradas por cliente_empresa_id).
     """
     from apps.servicio.models import Servicio
     empresas = list(cliente.cliente_empresas.all())
@@ -110,6 +111,7 @@ def _productos_para_pdf(cliente):
                 'producto': ce.producto or '-',
                 'tipo_cliente': ce.tipo_cliente or '-',
                 'vendedor': _vendedor_por_producto(cliente, ce),
+                'estado_venta': _estado_venta_por_producto(cliente, ce),
                 'respuestas': list(
                     FormularioCliente.objects.filter(cliente_empresa_id=ce.id, estado='1')
                     .order_by('nombre_campo')
@@ -123,8 +125,9 @@ def _productos_para_pdf(cliente):
     servicio_nombre = servicio.nombre if servicio else '-'
     producto = (cliente.producto or '').strip() or '-'
     vendedor = _vendedor_nombre_cliente(cliente) or '-'
+    estado_venta_legacy = _estado_venta_cliente(cliente)
     respuestas_legacy = list(cliente.respuestas_formulario.filter(cliente_empresa__isnull=True, estado='1').order_by('nombre_campo'))
-    return [{'empresa_nombre': empresa_nombre, 'servicio_nombre': servicio_nombre, 'producto': producto, 'tipo_cliente': '-', 'vendedor': vendedor, 'respuestas': respuestas_legacy}]
+    return [{'empresa_nombre': empresa_nombre, 'servicio_nombre': servicio_nombre, 'producto': producto, 'tipo_cliente': '-', 'vendedor': vendedor, 'estado_venta': estado_venta_legacy, 'respuestas': respuestas_legacy}]
 
 
 def _estado_venta_por_producto(cliente, cliente_empresa):
@@ -361,6 +364,21 @@ class ClienteViewSet(viewsets.ModelViewSet):
             'data': ClienteDetalleSerializer(instance).data,
         }, status=status.HTTP_200_OK)
 
+    @action(detail=True, methods=['get'], url_path=r'productos/(?P<producto_id>[^/.]+)/detalle')
+    def detalle_producto(self, request, pk=None, producto_id=None):
+        """
+        Devuelve solo la información que usa el modal del producto (ojito).
+        No incluye cliente (el front ya lo tiene en estado); producto sin id.
+        """
+        cliente = self.get_object()
+        try:
+            ce = cliente.cliente_empresas.get(pk=producto_id)
+        except ClienteEmpresa.DoesNotExist:
+            return Response({'detalle': 'Producto no encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+        return Response({
+            'producto': ClienteEmpresaDetalleModalSerializer(ce).data,
+        })
+
     @action(detail=True, methods=['post'], url_path='agregar-producto')
     def agregar_producto(self, request, pk=None):
         """Agrega un nuevo producto a un cliente existente (sin duplicar datos del cliente)."""
@@ -441,8 +459,6 @@ class ClienteViewSet(viewsets.ModelViewSet):
         """
         cliente = self.get_object()
         productos = _productos_para_pdf(cliente)
-        estado_venta_raw = _estado_venta_cliente(cliente)
-        estado_venta = _formatear_estado_venta(estado_venta_raw) if estado_venta_raw else '-'
         fecha_generacion = timezone.now().strftime('%d/%m/%Y %H:%M')
 
         buffer = io.BytesIO()
@@ -508,6 +524,8 @@ class ClienteViewSet(viewsets.ModelViewSet):
         for idx, prod in enumerate(productos):
             respuestas_producto = prod.get('respuestas') or []
             respuestas_sin_vendedor = [r for r in respuestas_producto if norm_campo(r.nombre_campo) != 'vendedor']
+            estado_venta_producto_raw = prod.get('estado_venta')
+            estado_venta_producto = _formatear_estado_venta(estado_venta_producto_raw) if estado_venta_producto_raw else '-'
             if idx > 0:
                 elements.append(PageBreak())
 
@@ -518,7 +536,7 @@ class ClienteViewSet(viewsets.ModelViewSet):
             elements.append(Paragraph(f'ESPACIO DE CONTRATO — {titulo_producto}', title_style))
             elements.append(Spacer(1, 14))
 
-            # 1. DATOS DEL CLIENTE (sin vendedor)
+            # 1. DATOS DEL CLIENTE (estado de venta es el de ESTE producto)
             elements.append(Paragraph('1. DATOS DEL CLIENTE', section_style))
             datos_cliente = [
                 ['NOMBRE', cliente.nombre or '-'],
@@ -526,7 +544,7 @@ class ClienteViewSet(viewsets.ModelViewSet):
                 ['NÚMERO DE IDENTIFICACIÓN', cliente.numero_identificacion or '-'],
                 ['TELÉFONO', cliente.telefono or '-'],
                 ['CORREO O CARTA', cliente.correo_electronico_o_carta or '-'],
-                ['ESTADO DE VENTA', estado_venta],
+                ['ESTADO DE VENTA', estado_venta_producto],
             ]
             t_cli = Table(datos_cliente, colWidths=[5 * cm, 10.5 * cm])
             t_cli.setStyle(TableStyle([
@@ -567,7 +585,7 @@ class ClienteViewSet(viewsets.ModelViewSet):
                     _formatear_valor_campo(
                         r.nombre_campo,
                         r.respuesta_campo,
-                        estado_venta_formateado=estado_venta,
+                        estado_venta_formateado=estado_venta_producto,
                         vendedor_nombre=None,
                     ),
                 ]
