@@ -2,6 +2,7 @@
 Modelos de la app cliente: Cliente, FormularioCliente (respuestas dinámicas), HistorialEstadoVenta y ClienteEmpresa.
 """
 from django.db import models
+from django.db.models import Q
 from django.utils import timezone
 
 from apps.persona.models import Persona
@@ -18,8 +19,10 @@ class Cliente(models.Model):
     telefono = models.CharField(max_length=20, blank=True)
     correo_electronico_o_carta = models.CharField(max_length=254, blank=True, default='')
     direccion = models.CharField(max_length=500, blank=True, default='')
-    cups = models.CharField(max_length=100, blank=True, default='')
     cuenta_bancaria = models.CharField(max_length=100, blank=True, default='')
+    documento_dni = models.FileField(upload_to='clientes/documentos/%Y/%m/', blank=True, null=True)
+    documento_factura = models.FileField(upload_to='clientes/documentos/%Y/%m/', blank=True, null=True)
+    creado_por_carga_masiva = models.BooleanField(default=False)
     compania_anterior = models.CharField(max_length=255, blank=True, default='')
     compania_actual = models.CharField(max_length=255, blank=True, default='')
     estado = models.CharField(max_length=20, choices=ESTADO, default='1')
@@ -96,11 +99,19 @@ class HistorialEstadoVenta(models.Model):
 
 
 class FormularioCliente(models.Model):
-    """Respuesta dinámica de un campo del formulario, asociada a un cliente."""
+    """Respuesta dinámica de un campo del formulario, asociada a un cliente o a un producto (ClienteEmpresa)."""
     cliente = models.ForeignKey(
         Cliente,
         on_delete=models.CASCADE,
         related_name='respuestas_formulario',
+    )
+    cliente_empresa = models.ForeignKey(
+        'ClienteEmpresa',
+        on_delete=models.CASCADE,
+        related_name='respuestas_formulario',
+        null=True,
+        blank=True,
+        help_text='Si está definido, la respuesta pertenece a este producto; si no, es legacy a nivel cliente.',
     )
     nombre_campo = models.CharField(max_length=255)
     respuesta_campo = models.TextField(blank=True)
@@ -126,7 +137,18 @@ class FormularioCliente(models.Model):
         verbose_name = 'Respuesta formulario cliente'
         verbose_name_plural = 'Respuestas formulario cliente'
         ordering = ['cliente', 'nombre_campo']
-        unique_together = [['cliente', 'nombre_campo']]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['cliente', 'nombre_campo'],
+                condition=Q(cliente_empresa__isnull=True),
+                name='unique_formulario_cliente_legacy',
+            ),
+            models.UniqueConstraint(
+                fields=['cliente_empresa', 'nombre_campo'],
+                condition=Q(cliente_empresa__isnull=False),
+                name='unique_formulario_cliente_por_producto',
+            ),
+        ]
 
     def __str__(self):
         return f'{self.cliente} - {self.nombre_campo}'
@@ -151,7 +173,15 @@ class ClienteEmpresa(models.Model):
         null=True,
         blank=True,
         related_name='cliente_empresas',
-        verbose_name='Vendedor del producto',
+        verbose_name='Comercial',
+    )
+    cerrador = models.ForeignKey(
+        'persona.Vendedor',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='cliente_empresas_cerrador',
+        verbose_name='Cerrador',
     )
     empresa = models.ForeignKey(
         Empresa,

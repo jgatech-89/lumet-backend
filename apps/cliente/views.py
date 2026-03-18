@@ -23,6 +23,7 @@ from .serializers import (
     ClienteDetalleSerializer,
     ClienteUpdateSerializer,
     ClienteAgregarProductoSerializer,
+    ClienteEmpresaDetalleModalSerializer,
     ClienteActualizarProductoSerializer,
     _cambiar_estado_venta,
 )
@@ -97,11 +98,10 @@ def _formatear_estado_venta_legible(valor):
 def _productos_para_pdf(cliente):
     """
     Devuelve una lista de diccionarios con la información de cada producto del cliente
-    para generar una página del PDF por cada uno. Si no hay ClienteEmpresa, se arma
-    un producto a partir de cliente.servicio_id y cliente.producto.
+    para generar una página del PDF por cada uno. Cada ítem incluye solo datos de ESE producto:
+    empresa/servicio/producto, vendedor, estado_venta y respuestas (filtradas por cliente_empresa_id).
     """
     from apps.servicio.models import Servicio
-    # Usar prefetch (get_queryset ya incluye ClienteEmpresa con estado='1' y select_related)
     empresas = list(cliente.cliente_empresas.all())
     if empresas:
         return [
@@ -111,6 +111,11 @@ def _productos_para_pdf(cliente):
                 'producto': ce.producto or '-',
                 'tipo_cliente': ce.tipo_cliente or '-',
                 'vendedor': _vendedor_por_producto(cliente, ce),
+                'estado_venta': _estado_venta_por_producto(cliente, ce),
+                'respuestas': list(
+                    FormularioCliente.objects.filter(cliente_empresa_id=ce.id, estado='1')
+                    .order_by('nombre_campo')
+                ),
             }
             for ce in empresas
         ]
@@ -120,7 +125,9 @@ def _productos_para_pdf(cliente):
     servicio_nombre = servicio.nombre if servicio else '-'
     producto = (cliente.producto or '').strip() or '-'
     vendedor = _vendedor_nombre_cliente(cliente) or '-'
-    return [{'empresa_nombre': empresa_nombre, 'servicio_nombre': servicio_nombre, 'producto': producto, 'tipo_cliente': '-', 'vendedor': vendedor}]
+    estado_venta_legacy = _estado_venta_cliente(cliente)
+    respuestas_legacy = list(cliente.respuestas_formulario.filter(cliente_empresa__isnull=True, estado='1').order_by('nombre_campo'))
+    return [{'empresa_nombre': empresa_nombre, 'servicio_nombre': servicio_nombre, 'producto': producto, 'tipo_cliente': '-', 'vendedor': vendedor, 'estado_venta': estado_venta_legacy, 'respuestas': respuestas_legacy}]
 
 
 def _estado_venta_por_producto(cliente, cliente_empresa):
@@ -299,12 +306,16 @@ class ClienteViewSet(viewsets.ModelViewSet):
             Prefetch(
                 'cliente_empresas',
                 queryset=ClienteEmpresa.objects.filter(estado='1')
-                .select_related('empresa', 'servicio', 'usuario_registra', 'vendedor')
+                .select_related('empresa', 'servicio', 'usuario_registra', 'vendedor', 'cerrador')
                 .prefetch_related(
                     Prefetch(
                         'historial_estados_venta',
                         queryset=HistorialEstadoVenta.objects.filter(activo=True).select_related('usuario_registra'),
-                    )
+                    ),
+                    Prefetch(
+                        'respuestas_formulario',
+                        queryset=FormularioCliente.objects.filter(estado='1').order_by('nombre_campo'),
+                    ),
                 )
                 .order_by('id'),
             ),
@@ -352,6 +363,21 @@ class ClienteViewSet(viewsets.ModelViewSet):
             'mensaje': 'Cliente actualizado correctamente.',
             'data': ClienteDetalleSerializer(instance).data,
         }, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['get'], url_path=r'productos/(?P<producto_id>[^/.]+)/detalle')
+    def detalle_producto(self, request, pk=None, producto_id=None):
+        """
+        Devuelve solo la información que usa el modal del producto (ojito).
+        No incluye cliente (el front ya lo tiene en estado); producto sin id.
+        """
+        cliente = self.get_object()
+        try:
+            ce = cliente.cliente_empresas.get(pk=producto_id)
+        except ClienteEmpresa.DoesNotExist:
+            return Response({'detalle': 'Producto no encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+        return Response({
+            'producto': ClienteEmpresaDetalleModalSerializer(ce).data,
+        })
 
     @action(detail=True, methods=['post'], url_path='agregar-producto')
     def agregar_producto(self, request, pk=None):
@@ -433,12 +459,6 @@ class ClienteViewSet(viewsets.ModelViewSet):
         """
         cliente = self.get_object()
         productos = _productos_para_pdf(cliente)
-        respuestas = sorted(
-            [r for r in cliente.respuestas_formulario.all() if r.estado == '1'],
-            key=lambda r: (r.nombre_campo or ''),
-        )
-        estado_venta_raw = _estado_venta_cliente(cliente)
-        estado_venta = _formatear_estado_venta(estado_venta_raw) if estado_venta_raw else '-'
         fecha_generacion = timezone.now().strftime('%d/%m/%Y %H:%M')
 
         buffer = io.BytesIO()
@@ -499,11 +519,13 @@ class ClienteViewSet(viewsets.ModelViewSet):
             textColor=color_pie,
         )
         elements = []
-
         norm_campo = lambda s: (s or '').lower().strip().replace(' ', '_')
-        respuestas_sin_vendedor = [r for r in respuestas if norm_campo(r.nombre_campo) != 'vendedor']
 
         for idx, prod in enumerate(productos):
+            respuestas_producto = prod.get('respuestas') or []
+            respuestas_sin_vendedor = [r for r in respuestas_producto if norm_campo(r.nombre_campo) != 'vendedor']
+            estado_venta_producto_raw = prod.get('estado_venta')
+            estado_venta_producto = _formatear_estado_venta(estado_venta_producto_raw) if estado_venta_producto_raw else '-'
             if idx > 0:
                 elements.append(PageBreak())
 
@@ -514,7 +536,7 @@ class ClienteViewSet(viewsets.ModelViewSet):
             elements.append(Paragraph(f'ESPACIO DE CONTRATO — {titulo_producto}', title_style))
             elements.append(Spacer(1, 14))
 
-            # 1. DATOS DEL CLIENTE (sin vendedor)
+            # 1. DATOS DEL CLIENTE (estado de venta es el de ESTE producto)
             elements.append(Paragraph('1. DATOS DEL CLIENTE', section_style))
             datos_cliente = [
                 ['NOMBRE', cliente.nombre or '-'],
@@ -522,7 +544,7 @@ class ClienteViewSet(viewsets.ModelViewSet):
                 ['NÚMERO DE IDENTIFICACIÓN', cliente.numero_identificacion or '-'],
                 ['TELÉFONO', cliente.telefono or '-'],
                 ['CORREO O CARTA', cliente.correo_electronico_o_carta or '-'],
-                ['ESTADO DE VENTA', estado_venta],
+                ['ESTADO DE VENTA', estado_venta_producto],
             ]
             t_cli = Table(datos_cliente, colWidths=[5 * cm, 10.5 * cm])
             t_cli.setStyle(TableStyle([
@@ -563,7 +585,7 @@ class ClienteViewSet(viewsets.ModelViewSet):
                     _formatear_valor_campo(
                         r.nombre_campo,
                         r.respuesta_campo,
-                        estado_venta_formateado=estado_venta,
+                        estado_venta_formateado=estado_venta_producto,
                         vendedor_nombre=None,
                     ),
                 ]
@@ -612,7 +634,7 @@ class ClienteViewSet(viewsets.ModelViewSet):
         """
         Exporta clientes a Excel: una fila por producto.
         Columnas: NOMBRE, TIPO IDENTIFICACIÓN, NÚMERO IDENTIFICACIÓN, TELÉFONO, CORREO,
-        SERVICIO, CONTRATISTA, TIPO PRODUCTO, ESTADO VENTA, VENDEDOR.
+        SERVICIO, COMPAÑÍA ACTUAL, TIPO PRODUCTO, ESTADO VENTA, VENDEDOR.
         Estado de venta y vendedor por producto. Datos del cliente unificados con merge vertical.
         """
         queryset = self.filter_queryset(self.get_queryset())
@@ -623,10 +645,10 @@ class ClienteViewSet(viewsets.ModelViewSet):
         def _mayus(s):
             return (s or '').strip().upper() if isinstance(s, str) else str(s or '').upper()
 
-        # SERVICIO = antes "Tipo de empresa"; CONTRATISTA = antes "Tipo de servicio"; orden: SERVICIO | CONTRATISTA | TIPO PRODUCTO
+        # SERVICIO = antes "Tipo de empresa"; COMPAÑÍA ACTUAL = antes "Tipo de servicio"; orden: SERVICIO | COMPAÑÍA ACTUAL | TIPO PRODUCTO
         headers = [
             'NOMBRE', 'TIPO IDENTIFICACIÓN', 'NÚMERO IDENTIFICACIÓN', 'TELÉFONO', 'CORREO ELECTRÓNICO O CARTA',
-            'SERVICIO', 'CONTRATISTA', 'TIPO PRODUCTO',
+            'SERVICIO', 'COMPAÑÍA ACTUAL', 'TIPO PRODUCTO',
             'ESTADO VENTA', 'VENDEDOR',
         ]
         ws.append(headers)
@@ -713,9 +735,16 @@ class ClienteViewSet(viewsets.ModelViewSet):
     def descargar_plantilla(self, request):
         """
         Descarga plantilla Excel para importación masiva de clientes.
-        Columnas: Nombre completo, Tipo identificación, Nº identificación, CUPS, Dirección,
-        Teléfono, Correo, Compañía anterior, Compañía actual, Producto, Correo electrónico o carta.
+        Columnas: Nombre completo, Tipo identificación (NIE/PAS/DNI/CIF), Nº identificación,
+        Cuenta bancaria, Dirección, Teléfono, Correo o carta o papel, Compañía anterior,
+        Compañía actual (selector), Producto, CUPS (opcional si LUZ/GAS), Mantenimiento (opcional si/no).
         """
+        from apps.core.choices import TIPO_IDENTIFICACION
+        from apps.formularios.models import Campo as CampoForm, CampoOpcion
+        from apps.servicio.models import Servicio as ServicioModel
+        from django.db.models import Q
+        from openpyxl.worksheet.datavalidation import DataValidation
+
         wb = Workbook()
         ws = wb.active
         ws.title = 'Clientes'
@@ -724,16 +753,16 @@ class ClienteViewSet(viewsets.ModelViewSet):
             'Nombre completo',
             'Tipo identificación',
             'Número identificación',
-            'CUPS',
             'Cuenta bancaria',
             'Dirección',
             'Teléfono',
-            'Correo electrónico o carta',
+            'Correo o carta o papel',
             'Compañía anterior',
             'Compañía actual',
-            'Servicio',
-            'Contratista',
             'Producto',
+            'CUPS',
+            'Mantenimiento',
+            'Fibra',
         ]
         ws.append(headers)
 
@@ -753,24 +782,140 @@ class ClienteViewSet(viewsets.ModelViewSet):
             cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
             cell.border = thin_border
 
+        # Obtener productos para ejemplo (antes de crear hoja Opciones)
+        nombres_producto = ['producto', 'Productos', 'Tipo producto', 'tipo de producto']
+        q_producto = Q()
+        for n in nombres_producto:
+            q_producto |= Q(nombre__iexact=n)
+        campos_producto_ej = CampoForm.objects.filter(
+            fecha_elimina__isnull=True, tipo='select'
+        ).filter(q_producto).prefetch_related('opciones')
+        primer_producto = ''
+        for cp in campos_producto_ej:
+            op = cp.opciones.filter(activo=True, estado='1').order_by('orden', 'id').first()
+            if op:
+                primer_producto = (op.value or op.label or '').strip()
+                break
+
+        # Obtener opciones Fibra (campo select en Configuración)
+        nombres_fibra = ['fibra', 'Fibra']
+        q_fibra = Q()
+        for n in nombres_fibra:
+            q_fibra |= Q(nombre__iexact=n)
+        campos_fibra = CampoForm.objects.filter(
+            fecha_elimina__isnull=True, tipo='select'
+        ).filter(q_fibra).prefetch_related('opciones')
+        primer_fibra = ''
+        fibra_opciones_lista = []
+        nombre_campo_fibra = ''
+        for cf in campos_fibra:
+            nombre_campo_fibra = cf.nombre
+            for op in cf.opciones.filter(activo=True, estado='1').order_by('orden', 'id'):
+                v = (op.value or op.label or '').strip()
+                if v and v not in fibra_opciones_lista:
+                    fibra_opciones_lista.append(v)
+                    if not primer_fibra:
+                        primer_fibra = v
+
         # Fila de ejemplo
         ws.append([
-            'Ejemplo: Juan Pérez',
-            'CC',
-            '123456789',
-            'ES0021000000000001AA',
-            'ES12 3456 7890 1234 5678',
+            'Juan Pérez',
+            'DNI',
+            '12345678A',
+            'ES12 3456 7890 1234 5678 90',
             'Calle Ejemplo 123',
             '600123456',
             'ejemplo@correo.com',
             'Empresa anterior S.L.',
-            'Empresa actual S.A.',
-            'Nombre del servicio (empresa)',
-            'Nombre del contratista (servicio)',
-            'Producto A',
+            'Nombre compañía actual',
+            primer_producto or '',
+            '',
+            '',
+            primer_fibra or '',
         ])
 
-        column_widths = [22, 18, 20, 24, 24, 28, 14, 28, 22, 22, 28, 28, 18]
+        # Hoja Opciones con valores válidos para validación
+        ws_opciones = wb.create_sheet('Opciones', 1)
+        ws_opciones['A1'] = 'Tipo identificación'
+        for i, (val, _) in enumerate(TIPO_IDENTIFICACION, start=2):
+            ws_opciones.cell(row=i, column=1, value=val)
+        ws_opciones['B1'] = 'Compañías actuales'
+        servicios = ServicioModel.objects.filter(estado='1', fecha_elimina__isnull=True).order_by('nombre')
+        for i, s in enumerate(servicios, start=2):
+            ws_opciones.cell(row=i, column=2, value=s.nombre or '')
+        ws_opciones['C1'] = 'Mantenimiento'
+        ws_opciones['C2'] = 'si'
+        ws_opciones['C3'] = 'no'
+        ws_opciones['D1'] = 'Productos'
+        campos_producto = CampoForm.objects.filter(
+            fecha_elimina__isnull=True, tipo='select'
+        ).filter(q_producto).prefetch_related('opciones')
+        productos_vistos = {}
+        row_prod = 2
+        for cp in campos_producto:
+            for op in cp.opciones.filter(activo=True, estado='1').order_by('orden', 'id'):
+                v = (op.value or op.label or '').strip()
+                if v and v not in productos_vistos:
+                    productos_vistos[v] = True
+                    ws_opciones.cell(row=row_prod, column=4, value=v)
+                    row_prod += 1
+
+        # Fibra (col E en Opciones) - opciones del campo select Fibra
+        ws_opciones['E1'] = 'Fibra'
+        row_fibra = 2
+        for v in fibra_opciones_lista:
+            ws_opciones.cell(row=row_fibra, column=5, value=v)
+            row_fibra += 1
+
+        # Validación de datos: Tipo identificación (col B)
+        tipo_opts = ','.join(v[0] for v in TIPO_IDENTIFICACION)
+        dv_tipo = DataValidation(
+            type='list',
+            formula1=f'"{tipo_opts}"',
+            allow_blank=True,
+        )
+        dv_tipo.add(f'B2:B1000')
+        ws.add_data_validation(dv_tipo)
+
+        # Validación: Compañía actual (col I) - referencia a hoja Opciones
+        if servicios.exists():
+            n_serv = servicios.count() + 1
+            dv_comp = DataValidation(
+                type='list',
+                formula1=f"Opciones!$B$2:$B${n_serv}",
+                allow_blank=True,
+            )
+            dv_comp.add('I2:I1000')
+            ws.add_data_validation(dv_comp)
+
+        # Validación: Producto (col J) - referencia a hoja Opciones
+        if productos_vistos:
+            n_prod = row_prod
+            dv_prod = DataValidation(
+                type='list',
+                formula1=f"Opciones!$D$2:$D${n_prod}",
+                allow_blank=True,
+            )
+            dv_prod.add('J2:J1000')
+            ws.add_data_validation(dv_prod)
+
+        # Validación: Mantenimiento (col L) - opcional, no obligatorio
+        dv_mant = DataValidation(type='list', formula1='"si,no"', allow_blank=True)
+        dv_mant.add('L2:L1000')
+        ws.add_data_validation(dv_mant)
+
+        # Validación: Fibra (col M) - opcional, opciones del campo en Configuración
+        if fibra_opciones_lista:
+            n_fibra = row_fibra
+            dv_fibra = DataValidation(
+                type='list',
+                formula1=f"Opciones!$E$2:$E${n_fibra}",
+                allow_blank=True,
+            )
+            dv_fibra.add('M2:M1000')
+            ws.add_data_validation(dv_fibra)
+
+        column_widths = [22, 18, 18, 28, 28, 14, 24, 22, 28, 18, 20, 14, 14]
         for col, width in enumerate(column_widths, start=1):
             ws.column_dimensions[ws.cell(row=1, column=col).column_letter].width = width
 
@@ -792,10 +937,15 @@ class ClienteViewSet(viewsets.ModelViewSet):
     def importar_excel(self, request):
         """
         Importa clientes desde Excel.
-        Columnas: Nombre, Tipo identificación, Nº identificación, CUPS, Cuenta bancaria,
-        Dirección, Teléfono, Correo, Compañía anterior, Compañía actual, Producto,
-        Correo electrónico o carta.
+        Columnas: Nombre completo, Tipo identificación (NIE/PAS/DNI/CIF), Nº identificación,
+        Cuenta bancaria, Dirección, Teléfono, Correo o carta o papel, Compañía anterior,
+        Compañía actual (selector), Producto, CUPS (opcional), Mantenimiento (opcional si/no).
         """
+        from apps.core.choices import TIPO_IDENTIFICACION
+        from apps.servicio.models import Servicio as ServicioModel
+        from apps.formularios.models import Campo as CampoForm
+        from django.db.models import Q
+
         archivo = request.FILES.get('archivo') or request.FILES.get('file')
 
         if not archivo:
@@ -813,10 +963,27 @@ class ClienteViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Columnas: 0=Nombre, 1=Tipo id, 2=Nº id, 3=CUPS, 4=Cuenta bancaria, 5=Dirección,
-        # 6=Teléfono, 7=Correo, 8=Compañía anterior, 9=Compañía actual, 10=Servicio, 11=Contratista, 12=Producto
-        from apps.empresa.models import Empresa
-        from apps.servicio.models import Servicio as ServicioModel
+        # Columnas: 0=Nombre, 1=Tipo id, 2=Nº id, 3=Cuenta bancaria, 4=Dirección, 5=Teléfono,
+        # 6=Correo, 7=Compañía anterior, 8=Compañía actual, 9=Producto, 10=CUPS, 11=Mantenimiento, 12=Fibra
+        tipos_validos = {v[0] for v in TIPO_IDENTIFICACION}
+        productos_con_cups = {'luz', 'gas', 'luz gas'}
+
+        # Opciones válidas Fibra (del campo select en Configuración)
+        nombres_fibra = ['fibra', 'Fibra']
+        q_fibra = Q()
+        for n in nombres_fibra:
+            q_fibra |= Q(nombre__iexact=n)
+        campo_fibra = CampoForm.objects.filter(
+            fecha_elimina__isnull=True, tipo='select'
+        ).filter(q_fibra).prefetch_related('opciones').first()
+        fibra_opciones_validas = set()
+        nombre_campo_fibra = ''
+        if campo_fibra:
+            nombre_campo_fibra = campo_fibra.nombre
+            for op in campo_fibra.opciones.filter(activo=True, estado='1'):
+                v = (op.value or op.label or '').strip()
+                if v:
+                    fibra_opciones_validas.add(v)
 
         creados = 0
         errores = []
@@ -830,49 +997,36 @@ class ClienteViewSet(viewsets.ModelViewSet):
                 errores.append(f'Fila {row_idx}: Nombre vacío.')
                 continue
 
-            tipo_id = (row[1] or '').strip() if len(row) > 1 else ''
+            tipo_id = (row[1] or '').strip().upper() if len(row) > 1 else ''
+            if tipo_id and tipo_id not in tipos_validos:
+                errores.append(
+                    f'Fila {row_idx}: Tipo identificación "{tipo_id}" no válido. Use: {", ".join(sorted(tipos_validos))}.'
+                )
+                continue
+
             numero_id = (row[2] or '') if len(row) > 2 else ''
-            cups = (row[3] or '').strip() if len(row) > 3 else ''
-            cuenta_bancaria = (row[4] or '').strip() if len(row) > 4 else ''
-            direccion = (row[5] or '').strip() if len(row) > 5 else ''
-            telefono = (row[6] or '') if len(row) > 6 else ''
-            correo_electronico_o_carta = (row[7] or '').strip() if len(row) > 7 else ''
-            compania_ant = (row[8] or '').strip() if len(row) > 8 else ''
-            compania_act = (row[9] or '').strip() if len(row) > 9 else ''
-            # Plantilla nueva: columnas 10=Servicio, 11=Contratista, 12=Producto. Antigua: 10=Producto.
-            tiene_columnas_servicio_contratista = len(row) > 11
-            if tiene_columnas_servicio_contratista:
-                servicio_nombre = (row[10] or '').strip() if len(row) > 10 else ''
-                contratista_nombre = (row[11] or '').strip() if len(row) > 11 else ''
-                producto = (row[12] or '').strip() if len(row) > 12 else ''
-            else:
-                servicio_nombre = ''
-                contratista_nombre = ''
-                producto = (row[10] or '').strip() if len(row) > 10 else ''
+            cuenta_bancaria = (row[3] or '').strip() if len(row) > 3 else ''
+            direccion = (row[4] or '').strip() if len(row) > 4 else ''
+            telefono = (row[5] or '') if len(row) > 5 else ''
+            correo_electronico_o_carta = (row[6] or '').strip() if len(row) > 6 else ''
+            compania_ant = (row[7] or '').strip() if len(row) > 7 else ''
+            compania_act = (row[8] or '').strip() if len(row) > 8 else ''
+            producto = (row[9] or '').strip() if len(row) > 9 else ''
+            cups = (row[10] or '').strip() if len(row) > 10 else ''
+            mantenimiento = (row[11] or '').strip().lower() if len(row) > 11 else ''
+            fibra = (row[12] or '').strip() if len(row) > 12 else ''
 
             servicio_id = None
-            if tiene_columnas_servicio_contratista and (servicio_nombre or contratista_nombre):
-                empresa = Empresa.objects.filter(
-                    nombre__iexact=servicio_nombre, estado='1'
-                ).first() if servicio_nombre else None
-                if not empresa and servicio_nombre:
-                    errores.append(f'Fila {row_idx}: El servicio "{servicio_nombre}" no existe.')
+            if compania_act:
+                servicio = ServicioModel.objects.filter(
+                    nombre__iexact=compania_act,
+                    estado='1',
+                    fecha_elimina__isnull=True,
+                ).first()
+                if not servicio:
+                    errores.append(f'Fila {row_idx}: La compañía actual "{compania_act}" no existe.')
                     continue
-                if contratista_nombre:
-                    servicio = ServicioModel.objects.filter(
-                        empresa=empresa, nombre__iexact=contratista_nombre, estado='1'
-                    ).first() if empresa else None
-                    if not servicio:
-                        errores.append(
-                            f'Fila {row_idx}: El contratista "{contratista_nombre}" no existe'
-                            + (f' para el servicio "{servicio_nombre}".' if servicio_nombre else '.')
-                        )
-                        continue
-                    servicio_id = servicio.id
-                elif empresa:
-                    primer_servicio = ServicioModel.objects.filter(empresa=empresa, estado='1').first()
-                    if primer_servicio:
-                        servicio_id = primer_servicio.id
+                servicio_id = servicio.id
 
             payload = {
                 'servicio_id': servicio_id,
@@ -882,7 +1036,6 @@ class ClienteViewSet(viewsets.ModelViewSet):
                 'telefono': telefono,
                 'correo_electronico_o_carta': correo_electronico_o_carta,
                 'direccion': direccion,
-                'cups': cups,
                 'cuenta_bancaria': cuenta_bancaria,
                 'compania_anterior': compania_ant,
                 'compania_actual': compania_act,
@@ -890,9 +1043,36 @@ class ClienteViewSet(viewsets.ModelViewSet):
                 'respuestas': [],
             }
 
-            serializer = ClienteCreateSerializer(data=payload, context={'request': request})
+            serializer = ClienteCreateSerializer(data=payload, context={'request': request, 'importar_excel': True})
             if serializer.is_valid():
-                serializer.save()
+                cliente = serializer.save()
+                cliente.creado_por_carga_masiva = True
+                cliente.save(update_fields=['creado_por_carga_masiva'])
+
+                ce = cliente.cliente_empresas.filter(estado='1').order_by('id').first()
+                producto_norm = ' '.join((producto or '').strip().lower().split())
+                if cups and producto_norm in productos_con_cups and ce:
+                    FormularioCliente.objects.update_or_create(
+                        cliente=cliente,
+                        cliente_empresa=ce,
+                        nombre_campo='CUPS',
+                        defaults={'respuesta_campo': cups, 'estado': '1'},
+                    )
+                if mantenimiento and mantenimiento in ('si', 'no') and ce:
+                    FormularioCliente.objects.update_or_create(
+                        cliente=cliente,
+                        cliente_empresa=ce,
+                        nombre_campo='Mantenimiento',
+                        defaults={'respuesta_campo': mantenimiento, 'estado': '1'},
+                    )
+                if fibra and nombre_campo_fibra and fibra in fibra_opciones_validas and ce:
+                    FormularioCliente.objects.update_or_create(
+                        cliente=cliente,
+                        cliente_empresa=ce,
+                        nombre_campo=nombre_campo_fibra,
+                        defaults={'respuesta_campo': fibra, 'estado': '1'},
+                    )
+
                 creados += 1
             else:
                 err_msg = '; '.join(
@@ -908,3 +1088,66 @@ class ClienteViewSet(viewsets.ModelViewSet):
             'creados': creados,
             'errores': errores[:50],
         }, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'], url_path='subir-documentos')
+    def subir_documentos(self, request, pk=None):
+        """Sube documento_dni y/o documento_factura. Permite primera carga para cualquier cliente."""
+        cliente = self.get_object()
+        doc_dni = request.FILES.get('documento_dni')
+        doc_factura = request.FILES.get('documento_factura')
+        if not doc_dni and not doc_factura:
+            return Response(
+                {'error': 'Debe adjuntar al menos documento_dni o documento_factura.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if doc_dni:
+            cliente.documento_dni = doc_dni
+        if doc_factura:
+            cliente.documento_factura = doc_factura
+        update_f = []
+        if doc_dni:
+            update_f.append('documento_dni')
+        if doc_factura:
+            update_f.append('documento_factura')
+        cliente.save(update_fields=update_f)
+        return Response({'mensaje': 'Documentos subidos correctamente.'}, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['get'], url_path='documento-dni')
+    def documento_dni(self, request, pk=None):
+        """Devuelve el PDF del DNI del cliente."""
+        cliente = self.get_object()
+        if not cliente.documento_dni:
+            return Response({'error': 'No hay documento DNI.'}, status=status.HTTP_404_NOT_FOUND)
+        from django.http import FileResponse
+        return FileResponse(cliente.documento_dni.open('rb'), as_attachment=False, content_type='application/pdf')
+
+    @action(detail=True, methods=['get'], url_path='documento-factura')
+    def documento_factura(self, request, pk=None):
+        """Devuelve el PDF de la factura del cliente."""
+        cliente = self.get_object()
+        if not cliente.documento_factura:
+            return Response({'error': 'No hay documento de factura.'}, status=status.HTTP_404_NOT_FOUND)
+        from django.http import FileResponse
+        return FileResponse(cliente.documento_factura.open('rb'), as_attachment=False, content_type='application/pdf')
+
+    @action(detail=True, methods=['get'], url_path='descargar-documento-dni')
+    def descargar_documento_dni(self, request, pk=None):
+        """Descarga el PDF del DNI del cliente."""
+        cliente = self.get_object()
+        if not cliente.documento_dni:
+            return Response({'error': 'No hay documento DNI.'}, status=status.HTTP_404_NOT_FOUND)
+        from django.http import FileResponse
+        response = FileResponse(cliente.documento_dni.open('rb'), as_attachment=True, filename='dni_cliente.pdf')
+        response['Content-Type'] = 'application/pdf'
+        return response
+
+    @action(detail=True, methods=['get'], url_path='descargar-documento-factura')
+    def descargar_documento_factura(self, request, pk=None):
+        """Descarga el PDF de la factura del cliente."""
+        cliente = self.get_object()
+        if not cliente.documento_factura:
+            return Response({'error': 'No hay documento de factura.'}, status=status.HTTP_404_NOT_FOUND)
+        from django.http import FileResponse
+        response = FileResponse(cliente.documento_factura.open('rb'), as_attachment=True, filename='factura_cliente.pdf')
+        response['Content-Type'] = 'application/pdf'
+        return response
