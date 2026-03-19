@@ -46,7 +46,7 @@ Si ves algo como *"Migration admin.0001_initial is applied before its dependency
 | Backend | http://localhost:8000 |
 | **Documentación API (Swagger)** | http://localhost:8000/api/docs/ |
 | **Documentación API (ReDoc)** | http://localhost:8000/api/docs/redoc/ |
-| Admin (solo si `DEBUG=1`) | http://localhost:8000/admin/ |
+| Admin (ruta por `ADMIN_URL`) | http://localhost:8000/<ADMIN_URL> |
 | **Login** (POST correo, password) | http://localhost:8000/auth/login |
 | **Verificar código** (POST correo, codigo) → JWT | http://localhost:8000/auth/verificar-codigo |
 | **Refresh token** (POST refresh) | http://localhost:8000/auth/refresh |
@@ -86,7 +86,7 @@ Para `docker compose exec` usa el **nombre del servicio** (ej. `lumet_postgres`,
 docker compose exec lumet_backend python manage.py createsuperuser
 ```
 
-Para login en la app usa el flujo de dos pasos: `POST /api/auth/login/` (correo + contraseña) y luego `POST /api/auth/verify-code/` (correo + código). El admin de Django **solo está habilitado cuando `DEBUG=1`**; en producción (`DEBUG=0`) la ruta `/admin/` devuelve 403.
+Para login en la app usa el flujo de dos pasos: `POST /api/auth/login/` (correo + contraseña) y luego `POST /api/auth/verify-code/` (correo + código). El admin de Django está habilitado en la ruta configurada por `ADMIN_URL` (recomendado: un valor largo/aleatorio) y requiere autenticación de Django.
 
 ## Reset de base de datos (si hay migraciones inconsistentes)
 

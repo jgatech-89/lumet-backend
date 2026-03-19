@@ -24,6 +24,10 @@ SECRET_KEY = env("SECRET_KEY", default="changeme-in-production")
 
 DEBUG = env("DEBUG")
 
+# Ruta configurable y no predecible del admin de Django.
+# Se recomienda usar un valor largo/aleatorio y servir siempre por HTTPS.
+ADMIN_URL = env("ADMIN_URL", default="admin/")
+
 # Hosts/dominios permitidos (separados por coma en .env). Vacío = todos (*) en dev.
 _allowed = env.list("ALLOWED_HOSTS", default=[])
 ALLOWED_HOSTS = _allowed if _allowed else ["*"]
