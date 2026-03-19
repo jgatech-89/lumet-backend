@@ -1,43 +1,69 @@
 """
 Django settings for lumet_backend project.
 
-Production-structured, configured for development.
+Configuración minimalista y lista para producción.
 Toda la configuración sensible se lee desde variables de entorno (.env).
 """
 
 from pathlib import Path
+from urllib.parse import urlparse
 
 import environ
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# Carga de variables de entorno desde .env (no sobrescribe variables ya definidas en el sistema)
+# Carga de variables de entorno desde .env (no sobrescribe variables ya definidas en el sistema).
+# Nota: mantenemos SOLO las variables necesarias en el .env final.
 env = environ.Env(
     DEBUG=(bool, False),
-    CSRF_COOKIE_SECURE=(bool, False),
-    SESSION_COOKIE_SECURE=(bool, False),
+    ALLOWED_HOSTS=(list, []),
+    CORS_ALLOWED_ORIGINS=(list, []),
+    CSRF_TRUSTED_ORIGINS=(list, []),
+    LOGIN_CODE_TIMEOUT=(int, 600),
+    PWD_RESET_TOKEN_TIMEOUT=(int, 300),
+    SIMPLE_JWT_ACCESS_TOKEN_HOURS=(int, 10),
+    SIMPLE_JWT_REFRESH_TOKEN_DAYS=(int, 30),
+    DB_PORT=(int, 5432),
 )
 environ.Env.read_env(BASE_DIR / ".env")
 
 # ─── Seguridad y entorno ───────────────────────────────────────────────────
-SECRET_KEY = env("SECRET_KEY", default="changeme-in-production")
+SECRET_KEY = env("SECRET_KEY")
+DEBUG = env.bool("DEBUG")
 
-DEBUG = env("DEBUG")
+FRONTEND_URL = env("FRONTEND_URL")
 
-# Ruta configurable y no predecible del admin de Django.
-# Se recomienda usar un valor largo/aleatorio y servir siempre por HTTPS.
-ADMIN_URL = env("ADMIN_URL", default="admin/")
 
-# Hosts/dominios permitidos (separados por coma en .env). Vacío = todos (*) en dev.
-_allowed = env.list("ALLOWED_HOSTS", default=[])
-ALLOWED_HOSTS = _allowed if _allowed else ["*"]
+def _normalize_origin(url: str) -> str:
+    """
+    Convierte una URL (con o sin path) a un origen: https://host.
+    """
 
-# CSRF: orígenes confiables (separados por coma). Ej: https://app.ejemplo.com,https://api.ejemplo.com
-CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", default=[])
+    parsed = urlparse(url)
+    scheme = parsed.scheme or "https"
+    netloc = parsed.netloc or parsed.path  # por si llega como "www.ejemplo.com"
+    netloc = netloc.split("/")[0]
+    return f"{scheme}://{netloc}".rstrip("/")
 
-# Cookies solo por HTTPS en producción (poner True en .env en producción)
-CSRF_COOKIE_SECURE = env("CSRF_COOKIE_SECURE")
-SESSION_COOKIE_SECURE = env("SESSION_COOKIE_SECURE")
+
+frontend_origin = _normalize_origin(FRONTEND_URL)
+
+# Hosts/dominios permitidos (separados por coma en .env).
+ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=[])
+if DEBUG:
+    # En desarrollo evitamos fricciones con host headers.
+    ALLOWED_HOSTS = ["*"]
+
+# CSRF: orígenes confiables (separados por coma). Default = FRONTEND_URL.
+CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", default=[frontend_origin])
+
+# Cookies: habilita cross-domain de forma segura (SameSite=None + Secure en producción).
+SESSION_COOKIE_DOMAIN = env("SESSION_COOKIE_DOMAIN", default=None) or None
+CSRF_COOKIE_DOMAIN = env("CSRF_COOKIE_DOMAIN", default=None) or None
+SESSION_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SECURE = not DEBUG
+SESSION_COOKIE_SAMESITE = "None" if not DEBUG else "Lax"
+CSRF_COOKIE_SAMESITE = "None" if not DEBUG else "Lax"
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -136,16 +162,13 @@ REST_FRAMEWORK = {
     ],
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     "DEFAULT_PAGINATION_CLASS": "config.pagination.StandardPagination",
-    "PAGE_SIZE": env.int("API_PAGE_SIZE", default=20),
+    "PAGE_SIZE": 20,
 }
 
 SPECTACULAR_SETTINGS = {
-    "TITLE": env("API_TITLE", default="Lumet API"),
-    "DESCRIPTION": env(
-        "API_DESCRIPTION",
-        default="API REST de Lumet. Autenticación por correo + código y JWT.",
-    ),
-    "VERSION": env("API_VERSION", default="1.0.0"),
+    "TITLE": "Lumet API",
+    "DESCRIPTION": "API REST de Lumet. Autenticación por correo + código y JWT.",
+    "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
     "COMPONENT_SPLIT_REQUEST": True,
     "SCHEMA_PATH_PREFIX": r"/api/docs",
@@ -156,36 +179,35 @@ from datetime import timedelta
 
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(hours=env.int("SIMPLE_JWT_ACCESS_TOKEN_HOURS", default=10)),
-    "REFRESH_TOKEN_LIFETIME": timedelta(days=env.int("SIMPLE_JWT_REFRESH_TOKEN_DAYS", default=7)),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=env.int("SIMPLE_JWT_REFRESH_TOKEN_DAYS", default=30)),
     "ROTATE_REFRESH_TOKENS": True,
     "BLACKLIST_AFTER_ROTATION": True,
     "AUTH_HEADER_TYPES": ("Bearer",),
 }
 
 # ─── CORS ──────────────────────────────────────────────────────────────────
-# Con DEBUG=True se permiten todos los orígenes; con DEBUG=False se usan CORS_ALLOWED_ORIGINS.
+# En producción se usan CORS_ALLOWED_ORIGINS (default = FRONTEND_URL).
+# Importante: con cross-domain + cookies, CORS debe permitir credenciales.
 CORS_ALLOW_ALL_ORIGINS = DEBUG
-_cors_origins = env.list("CORS_ALLOWED_ORIGINS", default=["http://localhost:3000", "http://127.0.0.1:3000"])
-CORS_ALLOWED_ORIGINS = _cors_origins
+CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS", default=[frontend_origin])
 
 # ─── Autenticación: tiempos de expiración (segundos) ────────────────────────
 LOGIN_CODE_TIMEOUT = env.int("LOGIN_CODE_TIMEOUT", default=600)  # código OTP login (default 10 min)
 PWD_RESET_TOKEN_TIMEOUT = env.int("PWD_RESET_TOKEN_TIMEOUT", default=300)  # token cambio contraseña (default 5 min)
 
-# ─── Email (dev: consola; prod: Resend o SMTP vía .env) ─────────────────────
-EMAIL_BACKEND = env("EMAIL_BACKEND", default="django.core.mail.backends.console.EmailBackend")
-DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default="noreply@lumet.local")
+# ─── Email (Resend) ────────────────────────────────────────────────────────
+RESEND_API_KEY = env("RESEND_API_KEY", default=None) or None
+RESEND_FROM_EMAIL = env("RESEND_FROM_EMAIL")
+DEFAULT_FROM_EMAIL = RESEND_FROM_EMAIL
 
-# Resend (producción): API key desde .env. Si está definida, el servicio de correo usará Resend.
-RESEND_API_KEY = env("API_KEY_RESEND", default=None) or None
-RESEND_FROM_EMAIL = env("RESEND_FROM_EMAIL", default=DEFAULT_FROM_EMAIL)
-RESEND_SANDBOX_FROM = env("RESEND_SANDBOX_FROM", default="Lumet <onboarding@resend.dev>")
-LUMET_LOGO_URL = env("LUMET_LOGO_URL", default=None) or None
+# Mantener compatibilidad con la plantilla de OTP.
+LUMET_LOGO_URL = None
 
 # ─── Cache (códigos de login: memoria en dev; en prod puede ser Redis) ──────
 CACHES = {
     "default": {
         "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
-        "OPTIONS": {"MAX_ENTRIES": env.int("CACHE_MAX_ENTRIES", default=1000)},
+        "OPTIONS": {"MAX_ENTRIES": 1000},
     }
 }

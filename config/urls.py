@@ -2,13 +2,12 @@
 URL configuration for lumet_backend project.
 Solo incluye las URLs de cada app; las rutas se definen en cada app.
 """
-from django.conf import settings
 from django.contrib import admin
 from django.urls import path, include
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView, SpectacularRedocView
 
 urlpatterns = [
-    path(settings.ADMIN_URL.lstrip("/"), admin.site.urls),
+    path("admin/", admin.site.urls),
     path('auth/', include('apps.auth.urls')),
     path('api/', include('apps.core.urls')),
     path('api/', include('apps.persona.urls')),
