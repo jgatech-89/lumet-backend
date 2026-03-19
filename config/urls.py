@@ -23,14 +23,14 @@ urlpatterns = [
     path('api/docs/redoc/', SpectacularRedocView.as_view(url_name='schema'), name='redoc'),
 ]
 
-# Admin solo en desarrollo (no accesible en producción)
-if settings.DEBUG:
-    urlpatterns.insert(0, path('admin/', admin.site.urls))
-    # Servir archivos media en desarrollo
-    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
-else:
+# # Admin solo en desarrollo (no accesible en producción)
+# if settings.DEBUG:
+#     urlpatterns.insert(0, path('admin/', admin.site.urls))
+#     # Servir archivos media en desarrollo
+#     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+# else:
 
-    def admin_forbidden(request):
-        return HttpResponseForbidden('<h1>403</h1><p>Admin no disponible en producción.</p>')
+#     def admin_forbidden(request):
+#         return HttpResponseForbidden('<h1>403</h1><p>Admin no disponible en producción.</p>')
 
-    urlpatterns.insert(0, path('admin/', admin_forbidden))
+#     urlpatterns.insert(0, path('admin/', admin_forbidden))
