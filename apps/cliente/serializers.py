@@ -33,31 +33,12 @@ class FormularioClienteSerializer(serializers.ModelSerializer):
 
 
 def _vendedor_nombre_por_cliente_empresa(cliente_empresa):
-    """Vendedor para un producto (ClienteEmpresa): historial activo, legacy o usuario_registra del ce."""
+    """Vendedor para un producto desde la relación directa ClienteEmpresa.vendedor."""
     if not cliente_empresa:
         return None
-    h = HistorialEstadoVenta.objects.filter(
-        cliente_empresa_id=cliente_empresa.pk,
-        activo=True,
-        estado_registro='1',
-    ).select_related('usuario_registra').order_by('-fecha_registra').first()
-    if h and h.usuario_registra_id:
-        p = h.usuario_registra
-        return getattr(p, 'nombre_completo', None) or (f'{getattr(p, "first_name", "")} {getattr(p, "last_name", "")}'.strip()) or str(p)
-    h_legacy = HistorialEstadoVenta.objects.filter(
-        cliente_id=cliente_empresa.cliente_id,
-        cliente_empresa__isnull=True,
-        activo=True,
-        estado_registro='1',
-    ).select_related('usuario_registra').order_by('-fecha_registra').first()
-    if h_legacy and h_legacy.usuario_registra_id:
-        p = h_legacy.usuario_registra
-        return getattr(p, 'nombre_completo', None) or (f'{getattr(p, "first_name", "")} {getattr(p, "last_name", "")}'.strip()) or str(p)
-    if cliente_empresa.usuario_registra_id:
-        p = cliente_empresa.usuario_registra
-        if p:
-            return getattr(p, 'nombre_completo', None) or (f'{getattr(p, "first_name", "")} {getattr(p, "last_name", "")}'.strip()) or str(p)
-    return None
+    if cliente_empresa.vendedor_id and cliente_empresa.vendedor:
+        return getattr(cliente_empresa.vendedor, 'nombre_completo', None) or str(cliente_empresa.vendedor)
+    return ''
 
 
 class ClienteEmpresaSerializer(serializers.ModelSerializer):
@@ -917,7 +898,6 @@ class ClienteActualizarProductoSerializer(serializers.Serializer):
         vendedor_id_val = None
         cerrador_id_val = None
         user = self.context['request'].user
-        es_admin = getattr(user, 'perfil', None) == 'admin' or getattr(user, 'is_superuser', False)
         for item in respuestas:
             nombre = (item.get('nombre_campo') or '').strip()
             if 'vendedor' in norm(nombre) and 'cerrador' not in norm(nombre):
@@ -925,14 +905,13 @@ class ClienteActualizarProductoSerializer(serializers.Serializer):
                     vendedor_id_val = int(str(item.get('respuesta_campo', '')).strip())
                 except (ValueError, TypeError):
                     vendedor_id_val = None
-            elif 'cerrador' in norm(nombre) and es_admin:
+            elif 'cerrador' in norm(nombre):
                 try:
                     cerrador_id_val = int(str(item.get('respuesta_campo', '')).strip())
                 except (ValueError, TypeError):
                     cerrador_id_val = None
-        if es_admin:
-            ce.vendedor_id = vendedor_id_val
-            ce.cerrador_id = cerrador_id_val
+        ce.vendedor_id = vendedor_id_val
+        ce.cerrador_id = cerrador_id_val
         ce.save()
         # Resto de respuestas -> FormularioCliente asociadas a ESTE producto (cliente_empresa)
         for item in respuestas:

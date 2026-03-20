@@ -152,25 +152,15 @@ def _nombre_persona(p):
 
 def _vendedor_por_producto(cliente, cliente_empresa):
     """
-    Vendedor del producto. La fuente principal es ClienteEmpresa.vendedor (tabla cliente_empresa).
-    Fallbacks: historial del producto, legacy, usuario_registra del ce, formulario cliente.
+    Vendedor del producto desde la relación directa ClienteEmpresa.vendedor.
+    Si no existe en el producto, usa fallback del formulario legacy del cliente.
     """
     if cliente_empresa:
         # 1) Vendedor del producto en ClienteEmpresa (relación directa producto-vendedor)
         if cliente_empresa.vendedor_id:
             v = cliente_empresa.vendedor
             return getattr(v, 'nombre_completo', None) or str(v) if v else ''
-        # 2) Historial activo de este producto -> usuario_registra
-        for h in cliente_empresa.historial_estados_venta.all():
-            if h and h.usuario_registra_id:
-                return _nombre_persona(h.usuario_registra)
-        # 3) Historial legacy (cliente_empresa null)
-        h_legacy = next((x for x in cliente.historial_estados_venta.all() if x.cliente_empresa_id is None and x.activo), None)
-        if h_legacy and h_legacy.usuario_registra_id:
-            return _nombre_persona(h_legacy.usuario_registra)
-        # 4) Quien registró este producto (al agregar producto)
-        if cliente_empresa.usuario_registra_id:
-            return _nombre_persona(cliente_empresa.usuario_registra)
+        # No usar usuario_registra/historial para evitar mostrar usuario en sesión como vendedor
     return _vendedor_nombre_cliente(cliente) or ''
 
 
