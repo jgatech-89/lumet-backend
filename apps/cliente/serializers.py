@@ -900,6 +900,7 @@ class ClienteActualizarProductoSerializer(serializers.Serializer):
         recibio_vendedor = False
         recibio_cerrador = False
         user = self.context['request'].user
+        es_admin = getattr(user, 'perfil', None) == 'admin' or getattr(user, 'is_superuser', False)
         for item in respuestas:
             nombre = (item.get('nombre_campo') or '').strip()
             es_comercial = ('vendedor' in norm(nombre) or 'comercial' in norm(nombre))
@@ -909,7 +910,7 @@ class ClienteActualizarProductoSerializer(serializers.Serializer):
                     vendedor_id_val = int(str(item.get('respuesta_campo', '')).strip())
                 except (ValueError, TypeError):
                     vendedor_id_val = None
-            elif 'cerrador' in norm(nombre):
+            elif 'cerrador' in norm(nombre) and es_admin:
                 recibio_cerrador = True
                 try:
                     cerrador_id_val = int(str(item.get('respuesta_campo', '')).strip())
