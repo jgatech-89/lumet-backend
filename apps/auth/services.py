@@ -60,22 +60,48 @@ def create_and_send_code(user):
     )
 
 def validate_and_clear_code(correo, codigo):
+    correo = str(correo).strip().lower()
+    codigo = str(codigo).strip()
+
     user = find_user_by_correo(correo)
 
     if not user:
-        return None
+        return {
+            "ok": False,
+            "error": "USER_NOT_FOUND",
+            "correo_input": correo
+        }
 
-    user.refresh_from_db()  # 🔥 CLAVE
+    user.refresh_from_db()
 
     stored_code = (user.codigo_verificado or '').strip()
 
-    if stored_code != str(codigo).strip():
-        return None
+    if not stored_code:
+        return {
+            "ok": False,
+            "error": "EMPTY_CODE_DB",
+            "db_code": stored_code,
+            "input_code": codigo,
+            "user_id": user.id
+        }
 
+    if stored_code != codigo:
+        return {
+            "ok": False,
+            "error": "CODE_MISMATCH",
+            "db_code": stored_code,
+            "input_code": codigo,
+            "user_id": user.id
+        }
+
+    # ✅ limpiar
     user.codigo_verificado = ''
     user.save(update_fields=['codigo_verificado'])
 
-    return user
+    return {
+        "ok": True,
+        "user": user
+    }
 
 def resend_code_for_correo(correo):
     """
