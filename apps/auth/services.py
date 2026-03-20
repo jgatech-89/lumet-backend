@@ -43,21 +43,16 @@ def validate_credentials(correo, password):
     return user
 
 def create_and_send_code(user):
-    """
-    Genera código, lo guarda en user.codigo_verificado y en cache, envía email al correo auth.
-    Devuelve True si todo ok.
-    """
     code = generate_verification_code(6)
+
     user.codigo_verificado = code
     user.save(update_fields=['codigo_verificado'])
-    email_key = (user.correo or user.email or '').strip().lower()
-    cache.set(_cache_key(email_key), user.id, timeout=CODE_TIMEOUT)
 
-    # Los códigos OTP se envían al correo auth (responsable/administrador), no al correo del usuario.
     recipient = getattr(user, 'correo_auth', None) or user.correo or user.email
     if not recipient:
         return False
-    ok = send_otp_email(
+
+    return send_otp_email(
         to=[recipient],
         code=code,
         subject='Código de confirmación - Lumet',
@@ -65,7 +60,6 @@ def create_and_send_code(user):
         message_body='Utiliza el siguiente código para completar tu inicio de sesión en Lumet.',
         expiry_minutes=CODE_TIMEOUT // 60,
     )
-    return ok
 
 def validate_and_clear_code(correo, codigo):
     correo = str(correo).strip().lower()
@@ -75,24 +69,18 @@ def validate_and_clear_code(correo, codigo):
     if not user:
         return None
 
-    # 🔥 usar EXACTAMENTE el mismo criterio que al guardar
-    email_key = (user.correo or user.email or '').strip().lower()
-    cache_key = _cache_key(email_key)
+    # 🔴 validar código directamente contra DB
+    stored_code = (user.codigo_verificado or '').strip()
 
-    cached_user_id = cache.get(cache_key)
-
-    # 🔴 validar cache correctamente
-    if not cached_user_id or cached_user_id != user.id:
+    if not stored_code:
         return None
 
-    # 🔴 validar código
-    if (user.codigo_verificado or '').strip() != codigo:
+    if stored_code != codigo:
         return None
 
-    # ✅ limpiar
+    # ✅ limpiar código (one-time use)
     user.codigo_verificado = ''
     user.save(update_fields=['codigo_verificado'])
-    cache.delete(cache_key)
 
     return user
 
