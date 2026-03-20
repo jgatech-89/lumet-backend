@@ -897,21 +897,28 @@ class ClienteActualizarProductoSerializer(serializers.Serializer):
         respuestas = self.validated_data.get('respuestas') or []
         vendedor_id_val = None
         cerrador_id_val = None
+        recibio_vendedor = False
+        recibio_cerrador = False
         user = self.context['request'].user
         for item in respuestas:
             nombre = (item.get('nombre_campo') or '').strip()
             if 'vendedor' in norm(nombre) and 'cerrador' not in norm(nombre):
+                recibio_vendedor = True
                 try:
                     vendedor_id_val = int(str(item.get('respuesta_campo', '')).strip())
                 except (ValueError, TypeError):
                     vendedor_id_val = None
             elif 'cerrador' in norm(nombre):
+                recibio_cerrador = True
                 try:
                     cerrador_id_val = int(str(item.get('respuesta_campo', '')).strip())
                 except (ValueError, TypeError):
                     cerrador_id_val = None
-        ce.vendedor_id = vendedor_id_val
-        ce.cerrador_id = cerrador_id_val
+        # Solo actualizar el campo que llegue en la solicitud para no borrar el otro.
+        if recibio_vendedor:
+            ce.vendedor_id = vendedor_id_val
+        if recibio_cerrador:
+            ce.cerrador_id = cerrador_id_val
         ce.save()
         # Resto de respuestas -> FormularioCliente asociadas a ESTE producto (cliente_empresa)
         for item in respuestas:
