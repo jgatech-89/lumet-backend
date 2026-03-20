@@ -37,7 +37,6 @@ class LoginView(APIView):
         return Response({'mensaje': MSG_CODE_SENT, 'correo_auth': correo_auth}, status=status.HTTP_200_OK)
 
 
-@verify_code_schema
 class VerificarCodigoView(APIView):
     permission_classes = [AllowAny]
 
@@ -45,11 +44,22 @@ class VerificarCodigoView(APIView):
         ser = VerificarCodigoSerializer(data=request.data)
         if not ser.is_valid():
             return Response(ser.errors, status=status.HTTP_400_BAD_REQUEST)
+
         correo = ser.validated_data['correo'].strip().lower()
         codigo = ser.validated_data['codigo'].strip()
-        user = services.validate_and_clear_code(correo, codigo)
-        if not user:
-            return Response({'detail': 'Código inválido o expirado.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        result = services.validate_and_clear_code(correo, codigo)
+
+        # 🔥 DEBUG RESPONSE
+        if not result["ok"]:
+            return Response({
+                "detail": "DEBUG",
+                "error": result["error"],
+                "debug": result
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        user = result["user"]
+
         refresh = RefreshToken.for_user(user)
         return Response({
             'access_token': str(refresh.access_token),
