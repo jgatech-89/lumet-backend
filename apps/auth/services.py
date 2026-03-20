@@ -68,20 +68,32 @@ def create_and_send_code(user):
     return ok
 
 def validate_and_clear_code(correo, codigo):
-    """
-    Valida el código para el correo. Si es correcto limpia codigo_verificado y cache.
-    Devuelve la Persona o None.
-    """
+    correo = str(correo).strip().lower()
+    codigo = str(codigo).strip()
+
     user = find_user_by_correo(correo)
     if not user:
         return None
-    if not cache.get(_cache_key(correo)):
+
+    # 🔥 usar EXACTAMENTE el mismo criterio que al guardar
+    email_key = (user.correo or user.email or '').strip().lower()
+    cache_key = _cache_key(email_key)
+
+    cached_user_id = cache.get(cache_key)
+
+    # 🔴 validar cache correctamente
+    if not cached_user_id or cached_user_id != user.id:
         return None
-    if (user.codigo_verificado or '').strip() != str(codigo).strip():
+
+    # 🔴 validar código
+    if (user.codigo_verificado or '').strip() != codigo:
         return None
+
+    # ✅ limpiar
     user.codigo_verificado = ''
     user.save(update_fields=['codigo_verificado'])
-    cache.delete(_cache_key(correo))
+    cache.delete(cache_key)
+
     return user
 
 def resend_code_for_correo(correo):
