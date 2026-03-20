@@ -902,7 +902,8 @@ class ClienteActualizarProductoSerializer(serializers.Serializer):
         user = self.context['request'].user
         for item in respuestas:
             nombre = (item.get('nombre_campo') or '').strip()
-            if 'vendedor' in norm(nombre) and 'cerrador' not in norm(nombre):
+            es_comercial = ('vendedor' in norm(nombre) or 'comercial' in norm(nombre))
+            if es_comercial and 'cerrador' not in norm(nombre):
                 recibio_vendedor = True
                 try:
                     vendedor_id_val = int(str(item.get('respuesta_campo', '')).strip())
