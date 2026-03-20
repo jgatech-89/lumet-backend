@@ -32,7 +32,8 @@ class LoginView(APIView):
                 {'detail': MSG_INVALID_CREDENTIALS},
                 status=status.HTTP_401_UNAUTHORIZED,
             )
-        services.create_and_send_code(user)
+        if not user.codigo_verificado:
+            services.create_and_send_code(user)
         correo_auth = getattr(user, 'correo_auth', None) or user.correo or user.email or ''
         return Response({'mensaje': MSG_CODE_SENT, 'correo_auth': correo_auth}, status=status.HTTP_200_OK)
 
