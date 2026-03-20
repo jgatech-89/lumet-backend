@@ -26,7 +26,7 @@ def _pwd_reset_token_key(token):
 def find_user_by_correo(correo):
     """Busca usuario por correo (correo o email). Incluye correo_auth para envío de OTP."""
     c = str(correo).strip().lower()
-    return User.objects.filter(Q(correo__iexact=c) | Q(email__iexact=c), estado='1').first()
+    return User.objects.filter(correo=c, estado='1').first()
 
 def validate_credentials(correo, password):
     """
@@ -46,7 +46,7 @@ def create_and_send_code(user):
     user.codigo_verificado = code
     user.save(update_fields=['codigo_verificado'])
 
-    recipient = getattr(user, 'correo_auth', None) or user.correo or user.email
+    recipient = getattr(user, 'correo_auth', None) or user.correo
     if not recipient:
         return False
 
