@@ -26,9 +26,7 @@ def _pwd_reset_token_key(token):
 def find_user_by_correo(correo):
     """Busca usuario por correo (correo o email). Incluye correo_auth para envío de OTP."""
     c = str(correo).strip().lower()
-    return User.objects.filter(Q(correo__iexact=c) | Q(email__iexact=c), estado='1').only(
-        'id', 'correo', 'email', 'correo_auth', 'password', 'codigo_verificado', 'estado'
-    ).first()
+    return User.objects.filter(Q(correo__iexact=c) | Q(email__iexact=c), estado='1').first()
 
 def validate_credentials(correo, password):
     """
