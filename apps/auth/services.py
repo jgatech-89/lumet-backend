@@ -60,23 +60,18 @@ def create_and_send_code(user):
     )
 
 def validate_and_clear_code(correo, codigo):
-    correo = str(correo).strip().lower()
-    codigo = str(codigo).strip()
-
     user = find_user_by_correo(correo)
+
     if not user:
         return None
 
-    # 🔴 validar código directamente contra DB
+    user.refresh_from_db()  # 🔥 CLAVE
+
     stored_code = (user.codigo_verificado or '').strip()
 
-    if not stored_code:
+    if stored_code != str(codigo).strip():
         return None
 
-    if stored_code != codigo:
-        return None
-
-    # ✅ limpiar código (one-time use)
     user.codigo_verificado = ''
     user.save(update_fields=['codigo_verificado'])
 
