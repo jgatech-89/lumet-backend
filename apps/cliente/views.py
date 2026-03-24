@@ -111,6 +111,7 @@ def _productos_para_pdf(cliente):
                 'producto': ce.producto or '-',
                 'tipo_cliente': ce.tipo_cliente or '-',
                 'vendedor': _vendedor_por_producto(cliente, ce),
+                'cerrador': _cerrador_por_producto(cliente, ce),
                 'estado_venta': _estado_venta_por_producto(cliente, ce),
                 'respuestas': list(
                     FormularioCliente.objects.filter(cliente_empresa_id=ce.id, estado='1')
@@ -127,7 +128,16 @@ def _productos_para_pdf(cliente):
     vendedor = _vendedor_nombre_cliente(cliente) or '-'
     estado_venta_legacy = _estado_venta_cliente(cliente)
     respuestas_legacy = list(cliente.respuestas_formulario.filter(cliente_empresa__isnull=True, estado='1').order_by('nombre_campo'))
-    return [{'empresa_nombre': empresa_nombre, 'servicio_nombre': servicio_nombre, 'producto': producto, 'tipo_cliente': '-', 'vendedor': vendedor, 'estado_venta': estado_venta_legacy, 'respuestas': respuestas_legacy}]
+    return [{
+        'empresa_nombre': empresa_nombre,
+        'servicio_nombre': servicio_nombre,
+        'producto': producto,
+        'tipo_cliente': '-',
+        'vendedor': vendedor,
+        'cerrador': _cerrador_por_producto(cliente, None),
+        'estado_venta': estado_venta_legacy,
+        'respuestas': respuestas_legacy,
+    }]
 
 
 def _estado_venta_por_producto(cliente, cliente_empresa):
@@ -162,6 +172,38 @@ def _vendedor_por_producto(cliente, cliente_empresa):
             return getattr(v, 'nombre_completo', None) or str(v) if v else ''
         # No usar usuario_registra/historial para evitar mostrar usuario en sesión como vendedor
     return _vendedor_nombre_cliente(cliente) or ''
+
+
+def _cerrador_por_producto(cliente, cliente_empresa):
+    """
+    Cerrador del producto: nombre completo desde ClienteEmpresa.cerrador.
+    Si no hay FK, intenta resolver el ID guardado en la respuesta del formulario.
+    """
+    from apps.persona.models import Vendedor
+
+    if cliente_empresa:
+        if cliente_empresa.cerrador_id:
+            c = cliente_empresa.cerrador
+            return getattr(c, 'nombre_completo', None) or str(c) if c else ''
+        r = cliente_empresa.respuestas_formulario.filter(nombre_campo__iexact='cerrador').first()
+        if r and str(r.respuesta_campo or '').strip():
+            raw = str(r.respuesta_campo).strip()
+            try:
+                v = Vendedor.objects.filter(fecha_elimina__isnull=True).get(id=int(raw))
+                return v.nombre_completo
+            except (ValueError, Vendedor.DoesNotExist):
+                return raw
+        return ''
+    # Legacy: respuesta a nivel cliente (sin ClienteEmpresa)
+    r = cliente.respuestas_formulario.filter(cliente_empresa__isnull=True, nombre_campo__iexact='cerrador').first()
+    if r and str(r.respuesta_campo or '').strip():
+        raw = str(r.respuesta_campo).strip()
+        try:
+            v = Vendedor.objects.filter(fecha_elimina__isnull=True).get(id=int(raw))
+            return v.nombre_completo
+        except (ValueError, Vendedor.DoesNotExist):
+            return raw
+    return ''
 
 
 def _productos_para_excel(cliente):
@@ -513,10 +555,10 @@ class ClienteViewSet(viewsets.ModelViewSet):
 
         for idx, prod in enumerate(productos):
             respuestas_producto = prod.get('respuestas') or []
-            respuestas_sin_vendedor = [
+            respuestas_solo_formulario = [
                 r
                 for r in respuestas_producto
-                if norm_campo(r.nombre_campo) not in ('vendedor', 'comercial')
+                if norm_campo(r.nombre_campo) not in ('vendedor', 'comercial', 'cerrador')
             ]
             estado_venta_producto_raw = prod.get('estado_venta')
             estado_venta_producto = _formatear_estado_venta(estado_venta_producto_raw) if estado_venta_producto_raw else '-'
@@ -571,7 +613,7 @@ class ClienteViewSet(viewsets.ModelViewSet):
             ]))
             elements.append(t_emp)
 
-            # 3. INFORMACIÓN DEL FORMULARIO (todos los campos excepto vendedor/comercial)
+            # 3. INFORMACIÓN DEL FORMULARIO (todos los campos excepto vendedor/comercial/cerrador)
             elements.append(Paragraph('3. INFORMACIÓN DEL FORMULARIO', section_style))
             datos_form = [
                 [
@@ -583,7 +625,7 @@ class ClienteViewSet(viewsets.ModelViewSet):
                         vendedor_nombre=None,
                     ),
                 ]
-                for r in respuestas_sin_vendedor
+                for r in respuestas_solo_formulario
             ]
             if datos_form:
                 t_form = Table(datos_form, colWidths=[5 * cm, 10.5 * cm])
@@ -599,12 +641,15 @@ class ClienteViewSet(viewsets.ModelViewSet):
             else:
                 elements.append(Paragraph('Sin respuestas de formulario registradas.', note_style))
 
-            # 4. DATOS DEL VENDEDOR (vendedor por producto, como en Excel)
+            # 4. DATOS DEL VENDEDOR (comercial y cerrador por producto; nombres, no IDs)
             vendedor_producto = prod.get('vendedor') or '-'
+            cerrador_producto = (prod.get('cerrador') or '').strip()
             elements.append(Paragraph('4. DATOS DEL VENDEDOR', section_style))
             datos_vendedor = [
                 ['VENDEDOR ASIGNADO', vendedor_producto],
             ]
+            if cerrador_producto:
+                datos_vendedor.append(['CERRADOR', cerrador_producto])
             t_vend = Table(datos_vendedor, colWidths=[5 * cm, 10.5 * cm])
             t_vend.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (0, -1), color_bg_etiqueta),
