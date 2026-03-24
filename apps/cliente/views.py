@@ -553,12 +553,20 @@ class ClienteViewSet(viewsets.ModelViewSet):
         elements = []
         norm_campo = lambda s: (s or '').lower().strip().replace(' ', '_')
 
+        def _es_campo_tipo_cliente_pdf(nombre):
+            """Excluye tipo de cliente del bloque 3 (no duplicar con sección 2 ni con el modelo)."""
+            n = norm_campo(nombre)
+            if n in ('tipo_cliente', 'tipo_de_cliente'):
+                return True
+            return n.replace('_', ' ') == 'tipo de cliente'
+
         for idx, prod in enumerate(productos):
             respuestas_producto = prod.get('respuestas') or []
             respuestas_solo_formulario = [
                 r
                 for r in respuestas_producto
                 if norm_campo(r.nombre_campo) not in ('vendedor', 'comercial', 'cerrador')
+                and not _es_campo_tipo_cliente_pdf(r.nombre_campo)
             ]
             estado_venta_producto_raw = prod.get('estado_venta')
             estado_venta_producto = _formatear_estado_venta(estado_venta_producto_raw) if estado_venta_producto_raw else '-'
@@ -844,7 +852,6 @@ class ClienteViewSet(viewsets.ModelViewSet):
         campos_fibra = CampoForm.objects.filter(
             fecha_elimina__isnull=True, tipo='select'
         ).filter(q_fibra).prefetch_related('opciones')
-        primer_fibra = ''
         fibra_opciones_lista = []
         nombre_campo_fibra = ''
         for cf in campos_fibra:
@@ -853,10 +860,8 @@ class ClienteViewSet(viewsets.ModelViewSet):
                 v = (op.value or op.label or '').strip()
                 if v and v not in fibra_opciones_lista:
                     fibra_opciones_lista.append(v)
-                    if not primer_fibra:
-                        primer_fibra = v
 
-        # Fila de ejemplo
+        # Fila de ejemplo (Fibra vacía por defecto; columna opcional al importar)
         ws.append([
             'Juan Pérez',
             'DNI',
@@ -870,7 +875,7 @@ class ClienteViewSet(viewsets.ModelViewSet):
             primer_producto or '',
             '',
             '',
-            primer_fibra or '',
+            '',
         ])
 
         # Hoja Opciones con valores válidos para validación
@@ -978,7 +983,8 @@ class ClienteViewSet(viewsets.ModelViewSet):
         Importa clientes desde Excel.
         Columnas: Nombre completo, Tipo identificación (NIE/PAS/DNI/CIF), Nº identificación,
         Cuenta bancaria, Dirección, Teléfono, Correo o carta o papel, Compañía anterior,
-        Compañía actual (selector), Producto, CUPS (opcional), Mantenimiento (opcional si/no).
+        Compañía actual (selector), Producto, CUPS (opcional), Mantenimiento (opcional si/no),
+        Fibra (opcional; vacío permitido).
         """
         from apps.core.choices import TIPO_IDENTIFICACION
         from apps.servicio.models import Servicio as ServicioModel
