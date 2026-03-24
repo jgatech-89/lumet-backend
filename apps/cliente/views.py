@@ -513,7 +513,11 @@ class ClienteViewSet(viewsets.ModelViewSet):
 
         for idx, prod in enumerate(productos):
             respuestas_producto = prod.get('respuestas') or []
-            respuestas_sin_vendedor = [r for r in respuestas_producto if norm_campo(r.nombre_campo) != 'vendedor']
+            respuestas_sin_vendedor = [
+                r
+                for r in respuestas_producto
+                if norm_campo(r.nombre_campo) not in ('vendedor', 'comercial')
+            ]
             estado_venta_producto_raw = prod.get('estado_venta')
             estado_venta_producto = _formatear_estado_venta(estado_venta_producto_raw) if estado_venta_producto_raw else '-'
             if idx > 0:
@@ -567,7 +571,7 @@ class ClienteViewSet(viewsets.ModelViewSet):
             ]))
             elements.append(t_emp)
 
-            # 3. INFORMACIÓN DEL FORMULARIO (todos los campos excepto vendedor)
+            # 3. INFORMACIÓN DEL FORMULARIO (todos los campos excepto vendedor/comercial)
             elements.append(Paragraph('3. INFORMACIÓN DEL FORMULARIO', section_style))
             datos_form = [
                 [
