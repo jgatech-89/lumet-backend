@@ -435,14 +435,14 @@ class ClienteCreateSerializer(serializers.Serializer):
         nombres_campos = {c.nombre for c in campos}
         respuestas_por_campo = {item.get('nombre_campo'): item.get('respuesta_campo', '') for item in respuestas if item.get('nombre_campo')}
 
-        NOMBRES_TIPO_CLIENTE = ['tipo_cliente', 'Tipo de cliente', 'Tipo Cliente', 'tipo cliente']
+        NOMBRES_TIPO_CLIENTE = ['tipo_cliente', 'Tipo de cliente', 'Tipo Cliente', 'tipo cliente', 'Tipo cliente']
         NOMBRES_ESTADO_VENTA = ['estado_venta', 'Estado de venta', 'Estado venta', 'estado venta']
         NOMBRES_PRODUCTO_CAMPO = ['producto', 'Producto', 'Productos', 'Tipo producto', 'tipo de producto', 'Tipo de Producto']
         NOMBRES_CAMBIO_TITULAR = ['cambio de titular', 'Cambio de titular', 'cambio titular', 'Cambio titular']
         NOMBRES_EXTRA_PERMITIDOS = ['vendedor', 'Vendedor', 'comercial', 'Comercial', 'cerrador', 'Cerrador']
         NOMBRES_CAMPO_MODELO_CLIENTE = []
         # Tipo cliente puede no venir en la importación Excel; no exigir como obligatorio en create
-        NOMBRES_TIPO_CLIENTE_CAMPO = ['tipo_cliente', 'tipo de cliente', 'Tipo de cliente', 'Tipo Cliente', 'tipo cliente']
+        NOMBRES_TIPO_CLIENTE_CAMPO = ['tipo_cliente', 'tipo de cliente', 'Tipo de cliente', 'Tipo Cliente', 'tipo cliente', 'Tipo cliente']
         # Vendedor puede no venir en la importación Excel; no exigir como obligatorio en create
         NOMBRES_VENDEDOR_CAMPO = ['vendedor', 'Vendedor', 'comercial', 'Comercial']
         NOMBRES_CERRADOR_CAMPO = ['cerrador', 'Cerrador']
@@ -568,7 +568,7 @@ class ClienteCreateSerializer(serializers.Serializer):
         )
 
         NOMBRES_ESTADO_VENTA = ['estado_venta', 'Estado de venta', 'Estado venta', 'estado venta']
-        NOMBRES_TIPO_CLIENTE = ['tipo_cliente', 'Tipo de cliente', 'Tipo Cliente', 'tipo cliente']
+        NOMBRES_TIPO_CLIENTE = ['tipo_cliente', 'Tipo de cliente', 'Tipo Cliente', 'tipo cliente', 'Tipo cliente']
         norm = lambda s: (s or '').lower().replace(' ', '_')
         estado_inicial = 'venta_iniciada'
         tipo_cliente_val = ''
@@ -657,7 +657,7 @@ class ClienteAgregarProductoSerializer(serializers.Serializer):
         nombres_campos = {c.nombre for c in campos}
         respuestas_por_campo = {item.get('nombre_campo'): item.get('respuesta_campo', '') for item in respuestas if item.get('nombre_campo')}
 
-        NOMBRES_TIPO_CLIENTE = ['tipo_cliente', 'Tipo de cliente', 'Tipo Cliente', 'tipo cliente']
+        NOMBRES_TIPO_CLIENTE = ['tipo_cliente', 'Tipo de cliente', 'Tipo Cliente', 'tipo cliente', 'Tipo cliente']
         NOMBRES_ESTADO_VENTA = ['estado_venta', 'Estado de venta', 'Estado venta', 'estado venta']
         NOMBRES_PRODUCTO_CAMPO = ['producto', 'Producto', 'Productos', 'Tipo producto', 'tipo de producto', 'Tipo de Producto']
         NOMBRES_CAMBIO_TITULAR = ['cambio de titular', 'Cambio de titular', 'cambio titular', 'Cambio titular']
@@ -773,7 +773,7 @@ class ClienteAgregarProductoSerializer(serializers.Serializer):
 
         servicio = Servicio.objects.filter(id=servicio_id).first()
         empresa_id = servicio.empresa_id if servicio else None
-        NOMBRES_TIPO_CLIENTE = ['tipo_cliente', 'Tipo de cliente', 'Tipo Cliente', 'tipo cliente']
+        NOMBRES_TIPO_CLIENTE = ['tipo_cliente', 'Tipo de cliente', 'Tipo Cliente', 'tipo cliente', 'Tipo cliente']
         tipo_cliente_val = ''
         vendedor_id_val = None
         cerrador_id_val = None

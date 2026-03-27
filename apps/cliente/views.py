@@ -16,6 +16,8 @@ from reportlab.lib.units import cm
 from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
 
+from apps.formularios.services import get_campos_formulario
+from .excel_import import run_excel_import
 from .models import Cliente, FormularioCliente, HistorialEstadoVenta, ClienteEmpresa
 from .serializers import (
     ClienteSerializer,
@@ -784,10 +786,11 @@ class ClienteViewSet(viewsets.ModelViewSet):
         Descarga plantilla Excel para importación masiva de clientes.
         Columnas: Nombre completo, Tipo identificación (NIE/PAS/DNI/CIF), Nº identificación,
         Cuenta bancaria, Dirección, Teléfono, Correo o carta o papel, Compañía anterior,
-        Compañía actual (selector), Producto, CUPS (opcional si LUZ/GAS), Mantenimiento (opcional si/no).
+        Compañía actual (selector), Producto, CUPS LUZ, CUPS GAS, Tipo cliente,
+        Mantenimiento (opcional si/no), Fibra (opcional).
         """
         from apps.core.choices import TIPO_IDENTIFICACION
-        from apps.formularios.models import Campo as CampoForm, CampoOpcion
+        from apps.formularios.models import Campo as CampoForm
         from apps.servicio.models import Servicio as ServicioModel
         from django.db.models import Q
         from openpyxl.worksheet.datavalidation import DataValidation
@@ -807,7 +810,9 @@ class ClienteViewSet(viewsets.ModelViewSet):
             'Compañía anterior',
             'Compañía actual',
             'Producto',
-            'CUPS',
+            'CUPS LUZ',
+            'CUPS GAS',
+            'Tipo cliente',
             'Mantenimiento',
             'Fibra',
         ]
@@ -844,6 +849,23 @@ class ClienteViewSet(viewsets.ModelViewSet):
                 primer_producto = (op.value or op.label or '').strip()
                 break
 
+        # Obtener opciones Tipo de cliente (campo select en Configuración)
+        nombres_tipo_cliente = [
+            'tipo_cliente', 'tipo de cliente', 'Tipo de cliente', 'Tipo Cliente', 'tipo cliente', 'Tipo cliente',
+        ]
+        q_tipo_cliente = Q()
+        for n in nombres_tipo_cliente:
+            q_tipo_cliente |= Q(nombre__iexact=n)
+        campos_tipo_cliente = CampoForm.objects.filter(
+            fecha_elimina__isnull=True, tipo='select'
+        ).filter(q_tipo_cliente).prefetch_related('opciones')
+        tipo_cliente_opciones = []
+        for ctc in campos_tipo_cliente:
+            for op in ctc.opciones.filter(activo=True, estado='1').order_by('orden', 'id'):
+                v = (op.value or op.label or '').strip()
+                if v and v not in tipo_cliente_opciones:
+                    tipo_cliente_opciones.append(v)
+
         # Obtener opciones Fibra (campo select en Configuración)
         nombres_fibra = ['fibra', 'Fibra']
         q_fibra = Q()
@@ -861,7 +883,7 @@ class ClienteViewSet(viewsets.ModelViewSet):
                 if v and v not in fibra_opciones_lista:
                     fibra_opciones_lista.append(v)
 
-        # Fila de ejemplo (Fibra vacía por defecto; columna opcional al importar)
+        # Fila de ejemplo (campos opcionales vacíos por defecto)
         ws.append([
             'Juan Pérez',
             'DNI',
@@ -873,6 +895,8 @@ class ClienteViewSet(viewsets.ModelViewSet):
             'Empresa anterior S.L.',
             'Nombre compañía actual',
             primer_producto or '',
+            '',
+            '',
             '',
             '',
             '',
@@ -910,6 +934,11 @@ class ClienteViewSet(viewsets.ModelViewSet):
         for v in fibra_opciones_lista:
             ws_opciones.cell(row=row_fibra, column=5, value=v)
             row_fibra += 1
+        ws_opciones['F1'] = 'Tipo cliente'
+        row_tc = 2
+        for v in tipo_cliente_opciones:
+            ws_opciones.cell(row=row_tc, column=6, value=v)
+            row_tc += 1
 
         # Validación de datos: Tipo identificación (col B)
         tipo_opts = ','.join(v[0] for v in TIPO_IDENTIFICACION)
@@ -943,12 +972,23 @@ class ClienteViewSet(viewsets.ModelViewSet):
             dv_prod.add('J2:J1000')
             ws.add_data_validation(dv_prod)
 
-        # Validación: Mantenimiento (col L) - opcional, no obligatorio
+        # Validación: Tipo cliente (col M) - opciones del backend
+        if tipo_cliente_opciones:
+            n_tc = row_tc
+            dv_tc = DataValidation(
+                type='list',
+                formula1=f"Opciones!$F$2:$F${n_tc}",
+                allow_blank=True,
+            )
+            dv_tc.add('M2:M1000')
+            ws.add_data_validation(dv_tc)
+
+        # Validación: Mantenimiento (col N) - opcional, no obligatorio
         dv_mant = DataValidation(type='list', formula1='"si,no"', allow_blank=True)
-        dv_mant.add('L2:L1000')
+        dv_mant.add('N2:N1000')
         ws.add_data_validation(dv_mant)
 
-        # Validación: Fibra (col M) - opcional, opciones del campo en Configuración
+        # Validación: Fibra (col O) - opcional, opciones del campo en Configuración
         if fibra_opciones_lista:
             n_fibra = row_fibra
             dv_fibra = DataValidation(
@@ -956,10 +996,10 @@ class ClienteViewSet(viewsets.ModelViewSet):
                 formula1=f"Opciones!$E$2:$E${n_fibra}",
                 allow_blank=True,
             )
-            dv_fibra.add('M2:M1000')
+            dv_fibra.add('O2:O1000')
             ws.add_data_validation(dv_fibra)
 
-        column_widths = [22, 18, 18, 28, 28, 14, 24, 22, 28, 18, 20, 14, 14]
+        column_widths = [22, 18, 18, 28, 28, 14, 24, 22, 28, 18, 20, 20, 18, 14, 14]
         for col, width in enumerate(column_widths, start=1):
             ws.column_dimensions[ws.cell(row=1, column=col).column_letter].width = width
 
@@ -981,158 +1021,27 @@ class ClienteViewSet(viewsets.ModelViewSet):
     def importar_excel(self, request):
         """
         Importa clientes desde Excel.
+        Validación completa del archivo (fase 1); persistencia atómica solo si no hay errores (fase 2).
+
         Columnas: Nombre completo, Tipo identificación (NIE/PAS/DNI/CIF), Nº identificación,
         Cuenta bancaria, Dirección, Teléfono, Correo o carta o papel, Compañía anterior,
-        Compañía actual (selector), Producto, CUPS (opcional), Mantenimiento (opcional si/no),
-        Fibra (opcional; vacío permitido).
+        Compañía actual (selector), Producto, CUPS LUZ, CUPS GAS, Tipo cliente,
+        Mantenimiento (opcional si/no), Fibra (opcional; vacío permitido).
         """
-        from apps.core.choices import TIPO_IDENTIFICACION
-        from apps.servicio.models import Servicio as ServicioModel
-        from apps.formularios.models import Campo as CampoForm
-        from django.db.models import Q
-
         archivo = request.FILES.get('archivo') or request.FILES.get('file')
 
         if not archivo:
             return Response(
-                {'error': 'Debe adjuntar un archivo Excel.'},
+                {
+                    'success': False,
+                    'errors': [{'fila': None, 'columna': 'Archivo', 'mensaje': 'Debe adjuntar un archivo Excel.', 'texto': 'Debe adjuntar un archivo Excel.'}],
+                    'errores': ['Debe adjuntar un archivo Excel.'],
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        try:
-            wb = load_workbook(archivo, read_only=True, data_only=True)
-            ws = wb.active
-        except Exception as e:
-            return Response(
-                {'error': f'No se pudo leer el archivo Excel: {str(e)}'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # Columnas: 0=Nombre, 1=Tipo id, 2=Nº id, 3=Cuenta bancaria, 4=Dirección, 5=Teléfono,
-        # 6=Correo, 7=Compañía anterior, 8=Compañía actual, 9=Producto, 10=CUPS, 11=Mantenimiento, 12=Fibra
-        tipos_validos = {v[0] for v in TIPO_IDENTIFICACION}
-        productos_con_cups = {'luz', 'gas', 'luz gas'}
-
-        # Opciones válidas Fibra (del campo select en Configuración)
-        nombres_fibra = ['fibra', 'Fibra']
-        q_fibra = Q()
-        for n in nombres_fibra:
-            q_fibra |= Q(nombre__iexact=n)
-        campo_fibra = CampoForm.objects.filter(
-            fecha_elimina__isnull=True, tipo='select'
-        ).filter(q_fibra).prefetch_related('opciones').first()
-        fibra_opciones_validas = set()
-        nombre_campo_fibra = ''
-        if campo_fibra:
-            nombre_campo_fibra = campo_fibra.nombre
-            for op in campo_fibra.opciones.filter(activo=True, estado='1'):
-                v = (op.value or op.label or '').strip()
-                if v:
-                    fibra_opciones_validas.add(v)
-
-        creados = 0
-        errores = []
-
-        for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
-            if not row or all(cell is None or str(cell).strip() == '' for cell in row):
-                continue
-
-            nombre = (row[0] or '').strip() if len(row) > 0 else ''
-            if not nombre:
-                errores.append(f'Fila {row_idx}: Nombre vacío.')
-                continue
-
-            tipo_id = (row[1] or '').strip().upper() if len(row) > 1 else ''
-            if tipo_id and tipo_id not in tipos_validos:
-                errores.append(
-                    f'Fila {row_idx}: Tipo identificación "{tipo_id}" no válido. Use: {", ".join(sorted(tipos_validos))}.'
-                )
-                continue
-
-            numero_id = (row[2] or '') if len(row) > 2 else ''
-            cuenta_bancaria = (row[3] or '').strip() if len(row) > 3 else ''
-            direccion = (row[4] or '').strip() if len(row) > 4 else ''
-            telefono = (row[5] or '') if len(row) > 5 else ''
-            correo_electronico_o_carta = (row[6] or '').strip() if len(row) > 6 else ''
-            compania_ant = (row[7] or '').strip() if len(row) > 7 else ''
-            compania_act = (row[8] or '').strip() if len(row) > 8 else ''
-            producto = (row[9] or '').strip() if len(row) > 9 else ''
-            cups = (row[10] or '').strip() if len(row) > 10 else ''
-            mantenimiento = (row[11] or '').strip().lower() if len(row) > 11 else ''
-            fibra = (row[12] or '').strip() if len(row) > 12 else ''
-
-            servicio_id = None
-            if compania_act:
-                servicio = ServicioModel.objects.filter(
-                    nombre__iexact=compania_act,
-                    estado='1',
-                    fecha_elimina__isnull=True,
-                ).first()
-                if not servicio:
-                    errores.append(f'Fila {row_idx}: La compañía actual "{compania_act}" no existe.')
-                    continue
-                servicio_id = servicio.id
-
-            payload = {
-                'servicio_id': servicio_id,
-                'nombre': nombre,
-                'tipo_identificacion': tipo_id,
-                'numero_identificacion': numero_id,
-                'telefono': telefono,
-                'correo_electronico_o_carta': correo_electronico_o_carta,
-                'direccion': direccion,
-                'cuenta_bancaria': cuenta_bancaria,
-                'compania_anterior': compania_ant,
-                'compania_actual': compania_act,
-                'producto': producto,
-                'respuestas': [],
-            }
-
-            serializer = ClienteCreateSerializer(data=payload, context={'request': request, 'importar_excel': True})
-            if serializer.is_valid():
-                cliente = serializer.save()
-                cliente.creado_por_carga_masiva = True
-                cliente.save(update_fields=['creado_por_carga_masiva'])
-
-                ce = cliente.cliente_empresas.filter(estado='1').order_by('id').first()
-                producto_norm = ' '.join((producto or '').strip().lower().split())
-                if cups and producto_norm in productos_con_cups and ce:
-                    FormularioCliente.objects.update_or_create(
-                        cliente=cliente,
-                        cliente_empresa=ce,
-                        nombre_campo='CUPS',
-                        defaults={'respuesta_campo': cups, 'estado': '1'},
-                    )
-                if mantenimiento and mantenimiento in ('si', 'no') and ce:
-                    FormularioCliente.objects.update_or_create(
-                        cliente=cliente,
-                        cliente_empresa=ce,
-                        nombre_campo='Mantenimiento',
-                        defaults={'respuesta_campo': mantenimiento, 'estado': '1'},
-                    )
-                if fibra and nombre_campo_fibra and fibra in fibra_opciones_validas and ce:
-                    FormularioCliente.objects.update_or_create(
-                        cliente=cliente,
-                        cliente_empresa=ce,
-                        nombre_campo=nombre_campo_fibra,
-                        defaults={'respuesta_campo': fibra, 'estado': '1'},
-                    )
-
-                creados += 1
-            else:
-                err_msg = '; '.join(
-                    f'{k}: {v[0]}' if isinstance(v, list) else f'{k}: {v}'
-                    for k, v in serializer.errors.items()
-                )
-                errores.append(f'Fila {row_idx}: {err_msg}')
-
-        wb.close()
-
-        return Response({
-            'mensaje': f'Se importaron {creados} cliente(s) correctamente.',
-            'creados': creados,
-            'errores': errores[:50],
-        }, status=status.HTTP_200_OK)
+        result = run_excel_import(request, archivo)
+        return Response(result['body'], status=result['http_status'])
 
     @action(detail=True, methods=['post'], url_path='subir-documentos')
     def subir_documentos(self, request, pk=None):
