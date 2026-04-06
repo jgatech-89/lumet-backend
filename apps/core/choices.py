@@ -3,11 +3,18 @@ Choices centralizados del sistema.
 Única fuente de verdad para los valores de selects/opciones usados en modelos y frontend.
 """
 
+# Códigos en `value`; `label` solo la descripción (el UI muestra "CC - CÉDULA DE CIUDADANÍA").
 TIPO_IDENTIFICACION = [
-    ('NIE', 'NIE - NÚMERO DE IDENTIFICACIÓN EXTRANJERO'),
-    ('PAS', 'PAS - PASAPORTE'),
-    ('DNI', 'DNI - DOCUMENTO NACIONAL DE IDENTIDAD'),
-    ('CIF', 'CIF - CÓDIGO DE IDENTIFICACIÓN FISCAL'),
+    ('CC', 'CÉDULA DE CIUDADANÍA'),
+    ('CE', 'CÉDULA DE EXTRANJERÍA'),
+    ('NIT', 'NÚMERO DE IDENTIFICACIÓN TRIBUTARIO'),
+    ('PAS', 'PASAPORTE'),
+    ('TI', 'TARJETA DE IDENTIDAD'),
+    ('PPT', 'PERMISO PROVISIONAL DE TRABAJO'),
+    ('DNI', 'DOCUMENTO NACIONAL DE IDENTIDAD'),
+    ('NIE', 'NÚMERO DE IDENTIFICACIÓN DE EXTRANJERO'),
+    ('CIF', 'CÓDIGO DE IDENTIFICACIÓN FISCAL'),
+    ('OTRO', 'OTRO DOCUMENTO'),
 ]
 
 PERFIL = [
